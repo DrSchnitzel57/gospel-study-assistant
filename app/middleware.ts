@@ -1,8 +1,21 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getSessionFromCookie } from '@/lib/auth';
+import { jwtVerify } from 'jose';
 
 const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/auth/session'];
+
+const JWT_SECRET = new TextEncoder().encode(
+  process.env.JWT_SECRET || 'change-me-to-a-secure-random-string'
+);
+
+async function verifyToken(token: string): Promise<{ userId: number; username: string; role: string } | null> {
+  try {
+    const { payload } = await jwtVerify(token, JWT_SECRET);
+    return payload as { userId: number; username: string; role: string };
+  } catch {
+    return null;
+  }
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -11,7 +24,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const session = await getSessionFromCookie(request.cookies.get('token')?.value || null);
+  const tokenCookie = request.cookies.get('token')?.value;
+  const session = tokenCookie ? await verifyToken(tokenCookie) : null;
 
   if (!session) {
     const loginUrl = new URL('/login', request.url);
