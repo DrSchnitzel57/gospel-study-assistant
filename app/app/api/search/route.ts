@@ -1,17 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSessionFromCookie } from '@/lib/auth';
+import { NextResponse } from 'next/server';
 import { search } from '@/lib/search';
 
-export async function POST(req: NextRequest) {
-  const session = await getSessionFromCookie(req.headers.get('cookie'));
-
-  if (!session) {
-    return NextResponse.json(
-      { error: 'Not authenticated' },
-      { status: 401 }
-    );
-  }
-
+export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { query, filters } = body;

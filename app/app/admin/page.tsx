@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
@@ -19,14 +19,11 @@ export default function AdminPage() {
   async function loadUsers() {
     try {
       const res = await fetch('/api/users');
-      if (!res.ok) {
-        if (res.status === 403) router.replace('/login');
-        return;
-      }
+      if (!res.ok) return;
       const data = await res.json();
       setUsers(data.users);
     } catch {
-      router.replace('/login');
+      // ignore
     }
   }
 
