@@ -1,0 +1,12 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Playwright browser dependencies
+COPY ingest/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt && \
+    playwright install --with-deps chromium
+
+COPY ingest/ ./
+
+CMD ["python", "-m", "scripts.run_ingest"]
