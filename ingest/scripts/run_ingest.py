@@ -28,18 +28,18 @@ def run_ingestion(target: str = 'all'):
 
     # Download commands
     if target == 'download_bible':
-        from download_scriptures import download_all_bible
+        from scripts.download_scriptures import download_all_bible
         download_all_bible()
         return
 
     if target == 'download_supplementary':
-        from download_supplementary import download_all
+        from scripts.download_supplementary import download_all
         download_all()
         return
 
     if target == 'download_all':
-        from download_scriptures import download_all_bible
-        from download_supplementary import download_all
+        from scripts.download_scriptures import download_all_bible
+        from scripts.download_supplementary import download_all
         download_all_bible()
         download_all()
         return
@@ -47,23 +47,23 @@ def run_ingestion(target: str = 'all'):
     # Ingestion commands
     if target in ('all', 'scripture'):
         try:
-            from ingest_scriptures import run_scripture_ingestion
+            from scripts.ingest_scriptures import run_scripture_ingestion
             logger.info("Starting scripture ingestion...")
             run_scripture_ingestion()
             logger.info("Scripture ingestion complete.")
-        except ImportError:
-            logger.error("Scripture ingestion module not found.")
+        except ImportError as e:
+            logger.error(f"Scripture ingestion module not found: {e}")
         except Exception as e:
             logger.error(f"Scripture ingestion failed: {e}")
 
     if target in ('all', 'supplementary'):
         try:
-            from ingest_supplementary import run_supplementary_ingestion
+            from scripts.ingest_supplementary import run_supplementary_ingestion
             logger.info("Starting supplementary ingestion...")
             run_supplementary_ingestion()
             logger.info("Supplementary ingestion complete.")
-        except ImportError:
-            logger.error("Supplementary ingestion module not found.")
+        except ImportError as e:
+            logger.error(f"Supplementary ingestion module not found: {e}")
         except Exception as e:
             logger.error(f"Supplementary ingestion failed: {e}")
 
