@@ -13,7 +13,7 @@ from psycopg2.extras import execute_values
 from pgvector.psycopg2 import register_vector
 import tiktoken
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 from llm import get_embeddings
 
 DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://gospel:gospelpass@db:5432/gospel_db')
