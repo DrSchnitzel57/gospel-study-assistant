@@ -10,6 +10,7 @@ LLM_API_KEY = os.environ.get('LLM_API_KEY', os.environ.get('OPENAI_API_KEY', 'de
 EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL', os.environ.get('OPENAI_BASE_URL', 'http://localhost:8000/v1'))
 EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY', os.environ.get('OPENAI_API_KEY', 'default-key'))
 EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'nomic-embed-text')
+EMBEDDING_DIMENSIONS = int(os.environ.get('EMBEDDING_DIMENSIONS', '768'))
 
 
 def get_embedding(text: str) -> List[float]:
@@ -51,6 +52,13 @@ def get_embeddings(texts: List[str], batch_size: int = 64) -> List[List[float]]:
                     raise ValueError(
                         f"Expected {len(batch)} embeddings, got {len(batch_embeddings)}"
                     )
+
+                for idx, emb in enumerate(batch_embeddings):
+                    if len(emb) != EMBEDDING_DIMENSIONS:
+                        raise ValueError(
+                            f"Embedding {idx} has {len(emb)} dimensions, expected {EMBEDDING_DIMENSIONS}. "
+                            f"Check EMBEDDING_DIMENSIONS in .env matches your model."
+                        )
 
                 all_embeddings.extend(batch_embeddings)
                 break

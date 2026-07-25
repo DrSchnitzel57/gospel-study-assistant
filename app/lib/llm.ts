@@ -38,7 +38,16 @@ export async function getEmbedding(text: string): Promise<number[]> {
     dimensions: EMBEDDING_DIMENSIONS,
   });
 
-  return response.data[0].embedding;
+  const embedding = response.data[0].embedding;
+
+  if (embedding.length !== EMBEDDING_DIMENSIONS) {
+    throw new Error(
+      `Embedding has ${embedding.length} dimensions, expected ${EMBEDDING_DIMENSIONS}. ` +
+      `Check EMBEDDING_DIMENSIONS in .env matches your model.`
+    );
+  }
+
+  return embedding;
 }
 
 export async function callLLM(messages: Array<{ role: string; content: string }>): Promise<string> {
