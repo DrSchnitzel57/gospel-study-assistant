@@ -5,6 +5,7 @@ import NextAuth from 'next-auth';
 const sharedSecret = process.env.FAMILY_SHARED_SECRET || '';
 
 export const { handlers, auth } = NextAuth({
+  trustHost: true,
   providers: [
     CredentialsProvider({
       type: 'credentials',
