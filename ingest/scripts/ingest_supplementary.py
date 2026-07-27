@@ -43,6 +43,18 @@ def ensure_schema(cur):
         cur.execute(
             "ALTER TABLE documents ADD CONSTRAINT documents_title_key UNIQUE (title)"
         )
+    # Ensure embedding column has fixed dimensions (required for HNSW index)
+    cur.execute(
+        """SELECT atttypmod FROM pg_attribute
+           WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'"""
+    )
+    row = cur.fetchone()
+    if row and row[0] == -1:
+        print("[Ingest] Altering embedding column to vector(4096)...")
+        cur.execute(
+            "ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(4096)"
+        )
+        print("[Ingest] Embedding column altered.")
     # Ensure HNSW vector index exists for fast similarity search
     cur.execute(
         "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'"

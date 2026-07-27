@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { registerType } from 'pgvector/pg';
+import { registerTypes } from 'pgvector/pg';
 
 let poolInstance: Pool | null = null;
 let indexEnsured = false;
@@ -8,6 +8,19 @@ async function ensureHnswIndex(): Promise<void> {
   if (indexEnsured) return;
   const pool = getPool();
   try {
+    // Check if embedding column has fixed dimensions
+    const colRes = await pool.query(
+      `SELECT atttypmod FROM pg_attribute
+       WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'`
+    );
+    if (colRes.rows.length > 0 && colRes.rows[0].atttypmod === -1) {
+      console.log('[DB] Altering embedding column to vector(4096)...');
+      await pool.query(
+        "ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(4096)"
+      );
+      console.log('[DB] Embedding column altered.');
+    }
+
     const res = await pool.query(
       "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'"
     );
@@ -35,7 +48,7 @@ function getPool(): Pool {
   });
 
   poolInstance.on('connect', async (client) => {
-    await registerType(client);
+    await registerTypes(client);
   });
 
   if (process.env.NODE_ENV !== 'production') {
@@ -52,8 +65,14 @@ function getPool(): Pool {
 
 const pool = getPool();
 
-pool.query('SELECT 1').finally(() => {
-  ensureHnswIndex();
-}).catch(() => {});
+// Ensure HNSW index on startup (non-blocking)
+setImmediate(async () => {
+  try {
+    await pool.query('SELECT 1');
+    await ensureHnswIndex();
+  } catch {
+    // DB not ready yet, will retry on first search
+  }
+});
 
 export default pool;
