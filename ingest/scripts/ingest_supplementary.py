@@ -27,6 +27,17 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 enc = tiktoken.get_encoding("cl100k_base")
 
 
+def ensure_schema(cur):
+    """Ensure required constraints exist (handles stale pgdata volumes)."""
+    cur.execute(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'sources_slug_key'"
+    )
+    if not cur.fetchone():
+        cur.execute(
+            "ALTER TABLE sources ADD CONSTRAINT sources_slug_key UNIQUE (slug)"
+        )
+
+
 def get_db_connection():
     conn = psycopg2.connect(DATABASE_URL)
     register_vector(conn)
@@ -60,6 +71,7 @@ def insert_chunks_batch(cur, doc_id, chunks, embeddings, verse_ref):
 
 def get_or_create_source(slug: str, name: str, conn):
     cur = conn.cursor()
+    ensure_schema(cur)
     cur.execute('SELECT id FROM sources WHERE slug = %s', (slug,))
     row = cur.fetchone()
     if row:
