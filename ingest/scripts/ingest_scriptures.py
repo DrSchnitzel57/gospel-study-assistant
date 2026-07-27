@@ -27,6 +27,13 @@ def ensure_schema(cur):
         cur.execute(
             "ALTER TABLE sources ADD CONSTRAINT sources_slug_key UNIQUE (slug)"
         )
+    cur.execute(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'documents_title_key'"
+    )
+    if not cur.fetchone():
+        cur.execute(
+            "ALTER TABLE documents ADD CONSTRAINT documents_title_key UNIQUE (title)"
+        )
 
 
 def get_db_connection():
@@ -148,6 +155,7 @@ def ingest_scripture_from_text(scripture_key: str, book_name: str, text: str):
     try:
         # Ensure schema is correct (handles stale pgdata volumes)
         ensure_schema(cur)
+        conn.commit()
 
         # Get or create source_id
         source_id = get_or_create_source(cur, scripture_key, config)
