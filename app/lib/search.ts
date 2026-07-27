@@ -162,16 +162,31 @@ export function validateQuotesAgainstChunks(
 
     return chunks.some(chunk => {
       const normalizedChunk = chunk.text.toLowerCase().trim();
-      const quoteWords = normalizedQuote.split(/\s+/).slice(0, 8).join(' ');
-      return normalizedChunk.includes(quoteWords);
+      // Try exact substring match first (longest prefix, up to 60 chars)
+      for (let len = Math.min(normalizedQuote.length, 60); len >= 20; len -= 5) {
+        const substring = normalizedQuote.slice(0, len);
+        if (normalizedChunk.includes(substring)) return true;
+      }
+      // Fallback: check first 4 words
+      const quoteWords = normalizedQuote.split(/\s+/).slice(0, 4).join(' ');
+      if (quoteWords.length > 10 && normalizedChunk.includes(quoteWords)) return true;
+      return false;
     });
   });
 }
 
 export async function search(query: string, filters: any = {}) {
+  const t0 = Date.now();
+
+  console.log(`[Search] Query: "${query.slice(0, 80)}"...`);
   const chunks = await searchChunks(query, filters);
+  console.log(`[Search] Found ${chunks.length} chunks in ${Date.now() - t0}ms`);
+  if (chunks.length > 0) {
+    console.log(`[Search] Top similarity: ${chunks[0].similarity.toFixed(4)}`);
+  }
 
   if (chunks.length === 0) {
+    console.log('[Search] No chunks found, returning no_results');
     return { quotes: [], no_results: true };
   }
 
@@ -186,18 +201,29 @@ export async function search(query: string, filters: any = {}) {
   }));
 
   const userPrompt = buildUserPrompt(query, contextChunks);
+  const t1 = Date.now();
   const rawOutput = await callLLM([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: userPrompt },
   ]);
+  console.log(`[Search] LLM responded in ${Date.now() - t1}ms`);
+  console.log(`[Search] Raw LLM output (first 200 chars): ${rawOutput.slice(0, 200)}`);
 
   const jsonStr = extractJSONFromLLMOutput(rawOutput);
   const parsed = validateLLMResponse(jsonStr);
 
   if (!parsed) {
+    console.log('[Search] LLM response failed validation, returning no_results');
     return { quotes: [], no_results: true };
   }
 
+  const before = parsed.quotes.length;
   parsed.quotes = validateQuotesAgainstChunks(parsed.quotes, chunks);
+  const after = parsed.quotes.length;
+  if (before !== after) {
+    console.log(`[Search] validateQuotesAgainstChunks: ${before} -> ${after} quotes`);
+  }
+
+  console.log(`[Search] Total time: ${Date.now() - t0}ms, returning ${parsed.quotes.length} quotes`);
   return parsed;
 }

@@ -32,12 +32,17 @@ export function getConfig() {
 }
 
 export async function getEmbedding(text: string): Promise<number[]> {
+  const t0 = Date.now();
   const response = await embeddingClient.embeddings.create({
     model: EMBEDDING_MODEL,
     input: text,
+  }, {
+    timeout: 60000,
   });
+  const elapsed = Date.now() - t0;
 
   const embedding = response.data[0].embedding;
+  console.log(`[Embedding] dims=${embedding.length}, model=${EMBEDDING_MODEL}, time=${elapsed}ms`);
 
   if (EMBEDDING_DIMENSIONS && embedding.length !== EMBEDDING_DIMENSIONS) {
     throw new Error(
@@ -55,6 +60,8 @@ export async function callLLM(messages: Array<{ role: string; content: string }>
     messages: messages as any,
     temperature: 0.1,
     max_tokens: 4096,
+  }, {
+    timeout: 120000,
   });
 
   return response.choices[0].message.content || '';

@@ -28,7 +28,7 @@ enc = tiktoken.get_encoding("cl100k_base")
 
 
 def ensure_schema(cur):
-    """Ensure required constraints exist (handles stale pgdata volumes)."""
+    """Ensure required constraints and indexes exist (handles stale pgdata volumes)."""
     cur.execute(
         "SELECT 1 FROM pg_constraint WHERE conname = 'sources_slug_key'"
     )
@@ -43,6 +43,16 @@ def ensure_schema(cur):
         cur.execute(
             "ALTER TABLE documents ADD CONSTRAINT documents_title_key UNIQUE (title)"
         )
+    # Ensure HNSW vector index exists for fast similarity search
+    cur.execute(
+        "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'"
+    )
+    if not cur.fetchone():
+        print("[Ingest] Creating HNSW index on chunks.embedding...")
+        cur.execute(
+            "CREATE INDEX idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops)"
+        )
+        print("[Ingest] HNSW index created.")
 
 
 def get_db_connection():

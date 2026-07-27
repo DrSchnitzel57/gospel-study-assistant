@@ -1,16 +1,21 @@
 """
-Downloads BYU devotionals, Come Follow Me manuals, and Gospel Topics using Playwright.
-Bypasses Cloudflare and handles client-side rendering.
+Downloads BYU devotionals, Come Follow Me manuals, and Gospel Topics.
+Uses Playwright for JS-rendered pages, falls back to requests for static content.
 """
 
 import os
 import re
 import json
 import time
+import requests as http_requests
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE_DIR = Path(__file__).parent.parent / 'data'
+REQUEST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+}
 
 
 def ensure_dirs():
@@ -25,6 +30,17 @@ def clean_text(html_content: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'[ \t]+', ' ', text)
     return text.strip()
+
+
+def try_http_get(url: str, timeout: int = 30) -> str:
+    """Try fetching a page with plain HTTP (works for static content)."""
+    try:
+        resp = http_requests.get(url, headers=REQUEST_HEADERS, timeout=timeout, allow_redirects=True)
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        print(f"    HTTP GET failed for {url}: {e}")
+        return ''
 
 
 def extract_page_text(page, min_length=200) -> str:
@@ -64,94 +80,97 @@ def extract_page_text(page, min_length=200) -> str:
 
 def download_byu_speeches() -> int:
     """Download BYU devotionals/speeches from speeches.byu.edu."""
-    print("\n=== Downloading BYU Speeches (Playwright) ===")
+    print("\n=== Downloading BYU Speeches ===")
 
     all_devotionals = []
     saved = 0
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            viewport={'width': 1920, 'height': 1080},
-        )
-        page = context.new_page()
+    # Try HTTP first
+    listing_html = try_http_get('https://speeches.byu.edu/')
+    if not listing_html:
+        print("  Could not fetch BYU speeches listing")
+        return 0
 
+    # Extract speech links
+    speech_links = []
+    for match in re.finditer(r'href=["\']([^"\']*)["\']', listing_html):
+        href = match.group(1)
+        if '/speech/' in href or '/devotional/' in href:
+            if href.startswith('/'):
+                href = 'https://speeches.byu.edu' + href
+            elif href.startswith('http'):
+                speech_links.append(href)
+            else:
+                speech_links.append('https://speeches.byu.edu/' + href)
+
+    speech_links = list(dict.fromkeys(speech_links))[:50]
+    print(f"  Found {len(speech_links)} speeches")
+
+    for i, speech_url in enumerate(speech_links):
         try:
-            page.goto('https://speeches.byu.edu/', wait_until='domcontentloaded', timeout=60000)
-            page.wait_for_timeout(4000)
+            speech_html = try_http_get(speech_url)
+            if not speech_html:
+                continue
 
-            # Collect speech links
-            speech_links = []
-            for link_elem in page.query_selector_all('a[href]'):
-                href = link_elem.get_attribute('href') or ''
-                if '/speech/' in href or '/devotional/' in href:
-                    if href.startswith('/'):
-                        href = 'https://speeches.byu.edu' + href
-                    elif href.startswith('http'):
-                        speech_links.append(href)
-                    else:
-                        speech_links.append('https://speeches.byu.edu/' + href)
+            # Extract title
+            title_match = re.search(r'<h1[^>]*>(.*?)</h1>', speech_html, re.DOTALL)
+            title = 'BYU Speech'
+            if title_match:
+                title = clean_text(title_match.group(1))
 
-            speech_links = list(dict.fromkeys(speech_links))[:50]
-            print(f"  Found {len(speech_links)} speeches")
+            # Extract speaker
+            speaker = 'Unknown'
+            speaker_match = re.search(
+                r'(?:speaker|author|presenter)[^>]*>([^<]+)',
+                speech_html, re.IGNORECASE
+            )
+            if speaker_match:
+                speaker = clean_text(speaker_match.group(1))
 
-            for i, speech_url in enumerate(speech_links):
-                try:
-                    page.goto(speech_url, wait_until='domcontentloaded', timeout=60000)
+            # Extract date
+            date_str = ''
+            date_match = re.search(r'<time[^>]*datetime=["\']([^"\']*)["\']', speech_html)
+            if date_match:
+                date_str = date_match.group(1)
 
-                    title = 'BYU Speech'
-                    h1 = page.query_selector('h1')
-                    if h1:
-                        title = h1.inner_text().strip()
+            # Extract content
+            text = ''
+            body_match = re.search(r'<body[^>]*>(.*?)</body>', speech_html, re.DOTALL)
+            if body_match:
+                body = body_match.group(1)
+                for remove in ['<script[^>]*>.*?</script>', '<style[^>]*>.*?</style>',
+                                '<nav[^>]*>.*?</nav>', '<footer[^>]*>.*?</footer>',
+                                '<header[^>]*>.*?</header>']:
+                    body = re.sub(remove, '', body, flags=re.DOTALL)
+                text = clean_text(body)
 
-                    speaker = 'Unknown'
-                    speaker_elem = page.query_selector(
-                        '[class*="speaker"], [class*="author"], [class*="presenter"], '
-                        'span[class*="name"], .speaker-name'
-                    )
-                    if speaker_elem:
-                        speaker = speaker_elem.inner_text().strip()
+            if text and len(text) > 200:
+                safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
+                safe_title = re.sub(r'\s+', '-', safe_title)
+                output_path = BASE_DIR / 'devotionals' / f'BYU_{safe_title}.txt'
 
-                    date_str = ''
-                    time_elem = page.query_selector('time')
-                    if time_elem:
-                        date_str = time_elem.get_attribute('datetime') or time_elem.inner_text().strip()
+                content = f"Title: {title}\n"
+                content += f"Speaker: {speaker}\n"
+                content += f"Date: {date_str}\n"
+                content += f"URL: {speech_url}\n\n"
+                content += text
 
-                    text = extract_page_text(page)
-
-                    if text and len(text) > 200:
-                        safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
-                        safe_title = re.sub(r'\s+', '-', safe_title)
-                        output_path = BASE_DIR / 'devotionals' / f'BYU_{safe_title}.txt'
-
-                        content = f"Title: {title}\n"
-                        content += f"Speaker: {speaker}\n"
-                        content += f"Date: {date_str}\n"
-                        content += f"URL: {speech_url}\n\n"
-                        content += text
-
-                        output_path.write_text(content, encoding='utf-8')
-                        all_devotionals.append({
-                            'title': title,
-                            'speaker': speaker,
-                            'date': date_str,
-                            'url': speech_url,
-                            'file': str(output_path),
-                        })
-                        saved += 1
-                        print(f"    [{i+1}/{len(speech_links)}] {title[:40]}... OK")
-
-                except Exception as e:
-                    print(f"    [{i+1}/{len(speech_links)}] ERROR: {e}")
-                    continue
-
-                time.sleep(1)
+                output_path.write_text(content, encoding='utf-8')
+                all_devotionals.append({
+                    'title': title,
+                    'speaker': speaker,
+                    'date': date_str,
+                    'url': speech_url,
+                    'file': str(output_path),
+                })
+                saved += 1
+                print(f"    [{i+1}/{len(speech_links)}] {title[:40]}... OK")
 
         except Exception as e:
-            print(f"  Error fetching BYU speeches listing: {e}")
+            print(f"    [{i+1}/{len(speech_links)}] ERROR: {e}")
+            continue
 
-        browser.close()
+        time.sleep(1)
 
     # Save index
     index_path = BASE_DIR / 'devotionals' / 'byu_index.json'
@@ -165,88 +184,101 @@ def download_byu_speeches() -> int:
 
 def download_cfm_manuals() -> int:
     """Download Come, Follow Me manuals from churchofjesuschrist.org."""
-    print("\n=== Downloading Come, Follow Me Manuals (Playwright) ===")
+    print("\n=== Downloading Come, Follow Me Manuals ===")
 
     all_lessons = []
     saved = 0
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            viewport={'width': 1920, 'height': 1080},
-        )
-        page = context.new_page()
+    years = ['2024', '2025']
+    seasons = ['01', '04', '07', '10']
+    audiences = ['individual-family']
 
-        years = ['2024', '2025']
-        seasons = ['01', '04', '07', '10']
-        audiences = ['individual-family']
+    for year in years:
+        for season in seasons:
+            period = f'{year}/{season}'
+            print(f"\n  Period: {period}")
 
-        for year in years:
-            for season in seasons:
-                period = f'{year}/{season}'
-                print(f"\n  Period: {period}")
+            for audience in audiences:
+                listing_url = f'https://www.churchofjesuschrist.org/study/come-follow-me/{audience}/{period}'
 
-                for audience in audiences:
-                    listing_url = f'https://www.churchofjesuschrist.org/study/come-follow-me/{audience}/{period}'
+                # Try HTTP first (CFM pages are mostly static)
+                html = try_http_get(listing_url)
+                if not html:
+                    print(f"    Could not fetch listing page, skipping period {period}")
+                    continue
 
+                # Extract lesson links from HTML
+                lesson_links = []
+                for match in re.finditer(r'href=["\']([^"\']*)["\']', html):
+                    href = match.group(1)
+                    if '/come-follow-me/' in href and len(href.split('/')) > 8:
+                        if href.startswith('/'):
+                            href = 'https://www.churchofjesuschrist.org' + href
+                        lesson_links.append(href)
+
+                lesson_links = list(dict.fromkeys(lesson_links))
+                print(f"    Found {len(lesson_links)} lessons")
+
+                for i, lesson_url in enumerate(lesson_links):
                     try:
-                        page.goto(listing_url, wait_until='domcontentloaded', timeout=60000)
-                        page.wait_for_timeout(3000)
+                        lesson_html = try_http_get(lesson_url)
+                        if not lesson_html:
+                            continue
 
-                        # Find lesson links
-                        lesson_links = []
-                        for link_elem in page.query_selector_all('a[href]'):
-                            href = link_elem.get_attribute('href') or ''
-                            if '/come-follow-me/' in href and len(href.split('/')) > 8:
-                                if href.startswith('/'):
-                                    href = 'https://www.churchofjesuschrist.org' + href
-                                lesson_links.append(href)
+                        # Extract title
+                        title_match = re.search(r'<h1[^>]*>(.*?)</h1>', lesson_html, re.DOTALL)
+                        title = f'Lesson {i+1}'
+                        if title_match:
+                            title = clean_text(title_match.group(1))
 
-                        lesson_links = list(dict.fromkeys(lesson_links))
-                        print(f"    Found {len(lesson_links)} lessons")
+                        # Extract main content - try article/main tags
+                        text = ''
+                        for tag in ['article', 'main', 'div[class*="content"]', 'div[class*="transcript"]']:
+                            content_match = re.search(
+                                r'<' + tag.replace('*', '[:alnum:]_-]+') + r'[^>]*>(.*?)</' +
+                                tag.split('[')[0].split('>')[0] + r'>',
+                                lesson_html, re.DOTALL
+                            )
+                            if content_match:
+                                text = clean_text(content_match.group(1))
+                                if len(text) > 200:
+                                    break
 
-                        for i, lesson_url in enumerate(lesson_links):
-                            try:
-                                page.goto(lesson_url, wait_until='domcontentloaded', timeout=60000)
+                        # Fallback: strip all tags from body
+                        if not text or len(text) < 200:
+                            body_match = re.search(r'<body[^>]*>(.*?)</body>', lesson_html, re.DOTALL)
+                            if body_match:
+                                body = body_match.group(1)
+                                for remove in ['<script[^>]*>.*?</script>', '<style[^>]*>.*?</style>',
+                                                '<nav[^>]*>.*?</nav>', '<footer[^>]*>.*?</footer>',
+                                                '<header[^>]*>.*?</header>']:
+                                    body = re.sub(remove, '', body, flags=re.DOTALL)
+                                text = clean_text(body)
 
-                                title = f'Lesson {i+1}'
-                                h1 = page.query_selector('h1')
-                                if h1:
-                                    title = h1.inner_text().strip()
+                        if text and len(text) > 200:
+                            safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
+                            safe_title = re.sub(r'\s+', '-', safe_title)
+                            output_path = BASE_DIR / 'manuals' / f'CFM_{period}_{safe_title}.txt'
 
-                                text = extract_page_text(page)
+                            content = f"Title: {title}\n"
+                            content += f"Period: {period}\n"
+                            content += f"URL: {lesson_url}\n\n"
+                            content += text
 
-                                if text and len(text) > 200:
-                                    safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
-                                    safe_title = re.sub(r'\s+', '-', safe_title)
-                                    output_path = BASE_DIR / 'manuals' / f'CFM_{period}_{safe_title}.txt'
+                            output_path.write_text(content, encoding='utf-8')
+                            all_lessons.append({
+                                'title': title,
+                                'period': period,
+                                'url': lesson_url,
+                                'file': str(output_path),
+                            })
+                            saved += 1
+                            print(f"      [{i+1}/{len(lesson_links)}] {title[:40]}... OK")
 
-                                    content = f"Title: {title}\n"
-                                    content += f"Period: {period}\n"
-                                    content += f"URL: {lesson_url}\n\n"
-                                    content += text
-
-                                    output_path.write_text(content, encoding='utf-8')
-                                    all_lessons.append({
-                                        'title': title,
-                                        'period': period,
-                                        'url': lesson_url,
-                                        'file': str(output_path),
-                                    })
-                                    saved += 1
-                                    print(f"      [{i+1}/{len(lesson_links)}] {title[:40]}... OK")
-
-                            except Exception:
-                                continue
-
-                            time.sleep(0.5)
-
-                    except Exception as e:
-                        print(f"    Error: {e}")
+                    except Exception:
                         continue
 
-        browser.close()
+                    time.sleep(0.5)
 
     # Save index
     index_path = BASE_DIR / 'manuals' / 'cfm_index.json'
@@ -260,74 +292,73 @@ def download_cfm_manuals() -> int:
 
 def download_gospel_topics() -> int:
     """Download Gospel Topics Essays from churchofjesuschrist.org."""
-    print("\n=== Downloading Gospel Topics (Playwright) ===")
+    print("\n=== Downloading Gospel Topics ===")
 
     all_essays = []
     saved = 0
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            viewport={'width': 1920, 'height': 1080},
-        )
-        page = context.new_page()
+    # Try HTTP first (Gospel Topics are static content)
+    listing_html = try_http_get('https://www.churchofjesuschrist.org/study/topics')
+    if not listing_html:
+        print("  Could not fetch topics listing")
+        return 0
 
+    # Extract topic links
+    topic_links = []
+    for match in re.finditer(r'href=["\']([^"\']*)["\']', listing_html):
+        href = match.group(1)
+        if '/study/topics/' in href:
+            if href.startswith('/'):
+                href = 'https://www.churchofjesuschrist.org' + href
+            topic_links.append(href)
+
+    topic_links = list(dict.fromkeys(topic_links))
+    print(f"  Found {len(topic_links)} topics")
+
+    for i, topic_url in enumerate(topic_links):
         try:
-            page.goto('https://www.churchofjesuschrist.org/study/topics',
-                      wait_until='domcontentloaded', timeout=60000)
-            page.wait_for_timeout(3000)
+            topic_html = try_http_get(topic_url)
+            if not topic_html:
+                continue
 
-            # Find topic essay links
-            topic_links = []
-            for link_elem in page.query_selector_all('a[href]'):
-                href = link_elem.get_attribute('href') or ''
-                if '/study/topics/' in href:
-                    if href.startswith('/'):
-                        href = 'https://www.churchofjesuschrist.org' + href
-                    topic_links.append(href)
+            title_match = re.search(r'<h1[^>]*>(.*?)</h1>', topic_html, re.DOTALL)
+            title = f'Topic {i+1}'
+            if title_match:
+                title = clean_text(title_match.group(1))
 
-            topic_links = list(dict.fromkeys(topic_links))
-            print(f"  Found {len(topic_links)} topics")
+            # Extract content
+            text = ''
+            body_match = re.search(r'<body[^>]*>(.*?)</body>', topic_html, re.DOTALL)
+            if body_match:
+                body = body_match.group(1)
+                for remove in ['<script[^>]*>.*?</script>', '<style[^>]*>.*?</style>',
+                                '<nav[^>]*>.*?</nav>', '<footer[^>]*>.*?</footer>',
+                                '<header[^>]*>.*?</header>']:
+                    body = re.sub(remove, '', body, flags=re.DOTALL)
+                text = clean_text(body)
 
-            for i, topic_url in enumerate(topic_links):
-                try:
-                    page.goto(topic_url, wait_until='domcontentloaded', timeout=60000)
+            if text and len(text) > 200:
+                safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
+                safe_title = re.sub(r'\s+', '-', safe_title)
+                output_path = BASE_DIR / 'history' / f'Topic_{safe_title}.txt'
 
-                    title = f'Topic {i+1}'
-                    h1 = page.query_selector('h1')
-                    if h1:
-                        title = h1.inner_text().strip()
+                content = f"Title: {title}\n"
+                content += f"URL: {topic_url}\n\n"
+                content += text
 
-                    text = extract_page_text(page)
+                output_path.write_text(content, encoding='utf-8')
+                all_essays.append({
+                    'title': title,
+                    'url': topic_url,
+                    'file': str(output_path),
+                })
+                saved += 1
+                print(f"    [{i+1}/{len(topic_links)}] {title[:40]}... OK")
 
-                    if text and len(text) > 200:
-                        safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
-                        safe_title = re.sub(r'\s+', '-', safe_title)
-                        output_path = BASE_DIR / 'history' / f'Topic_{safe_title}.txt'
+        except Exception:
+            continue
 
-                        content = f"Title: {title}\n"
-                        content += f"URL: {topic_url}\n\n"
-                        content += text
-
-                        output_path.write_text(content, encoding='utf-8')
-                        all_essays.append({
-                            'title': title,
-                            'url': topic_url,
-                            'file': str(output_path),
-                        })
-                        saved += 1
-                        print(f"    [{i+1}/{len(topic_links)}] {title[:40]}... OK")
-
-                except Exception:
-                    continue
-
-                time.sleep(0.5)
-
-        except Exception as e:
-            print(f"  Error fetching topics listing: {e}")
-
-        browser.close()
+        time.sleep(0.5)
 
     # Save index
     index_path = BASE_DIR / 'history' / 'topics_index.json'
