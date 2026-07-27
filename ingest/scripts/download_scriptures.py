@@ -145,7 +145,7 @@ def save_texts(texts: dict, target_dir: str):
     return saved
 
 
-def download_all():
+def download_all_bible():
     """Download all scriptures from JSON repo."""
     ensure_dirs()
 
@@ -186,4 +186,4 @@ def download_all():
 
 
 if __name__ == '__main__':
-    download_all()
+    download_all_bible()

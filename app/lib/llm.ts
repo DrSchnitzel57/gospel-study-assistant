@@ -35,15 +35,14 @@ export async function getEmbedding(text: string): Promise<number[]> {
   const response = await embeddingClient.embeddings.create({
     model: EMBEDDING_MODEL,
     input: text,
-    dimensions: EMBEDDING_DIMENSIONS,
   });
 
   const embedding = response.data[0].embedding;
 
-  if (embedding.length !== EMBEDDING_DIMENSIONS) {
+  if (EMBEDDING_DIMENSIONS && embedding.length !== EMBEDDING_DIMENSIONS) {
     throw new Error(
       `Embedding has ${embedding.length} dimensions, expected ${EMBEDDING_DIMENSIONS}. ` +
-      `Check EMBEDDING_DIMENSIONS in .env matches your model.`
+      `Check EMBEDDING_DIMENSIONS in .env matches your model output.`
     );
   }
 

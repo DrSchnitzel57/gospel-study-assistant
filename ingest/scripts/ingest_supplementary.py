@@ -102,7 +102,7 @@ def ingest_text_file(
         cur.execute(
             """INSERT INTO documents (title, author, date, source_type, official_status, doctrinal_weight, content_category, source_id)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT DO NOTHING
+               ON CONFLICT (title) DO NOTHING
                RETURNING id""",
             (title, author, date or None, source_type, official_status,
              doctrinal_weight, content_category, source_id)

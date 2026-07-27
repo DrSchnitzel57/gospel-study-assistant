@@ -1,16 +1,7 @@
 -- Enable pgvector extension
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Users table
-CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Sources table (for UI toggles)
+-- Sources table
 CREATE TABLE IF NOT EXISTS sources (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -32,7 +23,8 @@ CREATE TABLE IF NOT EXISTS documents (
     content_category VARCHAR(30) NOT NULL CHECK (content_category IN ('scripture', 'conference', 'manual', 'devotional', 'history')),
     source_id INTEGER REFERENCES sources(id),
     raw_url TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (title)
 );
 
 -- Chunks table (text segments with embeddings)

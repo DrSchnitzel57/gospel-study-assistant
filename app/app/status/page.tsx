@@ -22,10 +22,6 @@ function StatusBadge({ connected, error }: { connected: boolean; error?: string 
 export default function StatusPage() {
   const [status, setStatus] = useState<StatusData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [ingestAction, setIngestAction] = useState<string | null>(null);
-  const [ingestOutput, setIngestOutput] = useState('');
-  const [ingestLoading, setIngestLoading] = useState(false);
-  const [ingestError, setIngestError] = useState('');
 
   const loadStatus = useCallback(async () => {
     try {
@@ -44,41 +40,6 @@ export default function StatusPage() {
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
-
-  async function runIngest(action: string) {
-    setIngestAction(action);
-    setIngestOutput('');
-    setIngestError('');
-    setIngestLoading(true);
-
-    try {
-      const res = await fetch('/api/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setIngestError(data.error || 'Ingestion failed');
-      }
-
-      setIngestOutput((data.output || '').trim());
-      setTimeout(() => loadStatus(), 2000);
-    } catch (err: any) {
-      setIngestError(err.message);
-    } finally {
-      setIngestLoading(false);
-    }
-  }
-
-  const ingestSteps = [
-    { action: 'download_bible', label: 'Download Scriptures', desc: 'Downloads OT, NT, BoM, D&C, PoGP from GitHub (~12 MB)' },
-    { action: 'scripture', label: 'Ingest Scriptures', desc: 'Chunks, embeds, and stores scriptures in the database' },
-    { action: 'download_supplementary', label: 'Download Supplementary', desc: 'Scrapes conference talks, manuals, devotionals, Gospel Topics' },
-    { action: 'supplementary', label: 'Ingest Supplementary', desc: 'Chunks, embeds, and stores supplementary content' },
-  ];
 
   if (loading) {
     return (
@@ -186,50 +147,30 @@ export default function StatusPage() {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-primary mb-1">Ingestion</h2>
-        <p className="text-sm text-gray-500 mb-5">Run these in order: Download, then Ingest</p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          {ingestSteps.map(step => (
-            <div key={step.action} className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-medium text-gray-800">{step.label}</h3>
-                  <p className="text-xs text-gray-500 mt-1">{step.desc}</p>
-                </div>
-                <button
-                  onClick={() => runIngest(step.action)}
-                  disabled={ingestLoading}
-                  className="px-3 py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0"
-                >
-                  {ingestLoading && ingestAction === step.action ? 'Running...' : 'Run'}
-                </button>
-              </div>
-            </div>
-          ))}
+        <h2 className="text-lg font-semibold text-primary mb-1">Ingestion Commands</h2>
+        <p className="text-sm text-gray-500 mb-4">Run these from your terminal on the server:</p>
+        <div className="space-y-3">
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium text-gray-800 mb-1">1. Download Scriptures</h3>
+            <p className="text-xs text-gray-500 mb-2">Downloads OT, NT, BoM, D&C, PoGP from GitHub (~12 MB)</p>
+            <code className="block bg-gray-50 text-xs font-mono p-2 rounded">docker compose run --rm ingest python -m scripts.run_ingest download_bible</code>
+          </div>
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium text-gray-800 mb-1">2. Ingest Scriptures</h3>
+            <p className="text-xs text-gray-500 mb-2">Chunks, embeds, and stores in database (~5-10 min)</p>
+            <code className="block bg-gray-50 text-xs font-mono p-2 rounded">docker compose run --rm ingest python -m scripts.run_ingest scripture</code>
+          </div>
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium text-gray-800 mb-1">3. Download Supplementary</h3>
+            <p className="text-xs text-gray-500 mb-2">Scrapes conference, manuals, devotionals, Gospel Topics</p>
+            <code className="block bg-gray-50 text-xs font-mono p-2 rounded">docker compose run --rm ingest python -m scripts.run_ingest download_supplementary</code>
+          </div>
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium text-gray-800 mb-1">4. Ingest Supplementary</h3>
+            <p className="text-xs text-gray-500 mb-2">Chunks, embeds, and stores supplementary content</p>
+            <code className="block bg-gray-50 text-xs font-mono p-2 rounded">docker compose run --rm ingest python -m scripts.run_ingest supplementary</code>
+          </div>
         </div>
-
-        {ingestLoading && (
-          <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
-            <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            Running "{ingestAction}" — this may take several minutes...
-          </div>
-        )}
-
-        {ingestError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-sm text-red-700">
-            {ingestError}
-          </div>
-        )}
-
-        {ingestOutput && !ingestLoading && (
-          <div>
-            <div className="text-xs text-gray-500 mb-2">Output:</div>
-            <pre className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-700 overflow-auto max-h-64 whitespace-pre-wrap">
-              {ingestOutput}
-            </pre>
-          </div>
-        )}
       </div>
     </div>
   );

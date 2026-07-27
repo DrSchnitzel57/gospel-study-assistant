@@ -132,7 +132,7 @@ def ingest_scripture_from_text(scripture_key: str, book_name: str, text: str):
         cur.execute(
             """INSERT INTO documents (title, author, source_type, official_status, doctrinal_weight, content_category, source_id)
                VALUES (%s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT DO NOTHING
+               ON CONFLICT (title) DO NOTHING
                RETURNING id""",
             (f"{config['name']}: {book_name}", 'Joseph Smith / Translated',
              config['source_type'], config['official_status'],

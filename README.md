@@ -43,7 +43,7 @@ LLM_MODEL=your-model-name
 EMBEDDING_BASE_URL=http://your-ai-server:8000/v1
 EMBEDDING_API_KEY=your-key-if-needed
 EMBEDDING_MODEL=your-embedding-model-name
-EMBEDDING_DIMENSIONS=768
+EMBEDDING_DIMENSIONS=4096
 
 # Authentication
 FAMILY_SHARED_SECRET=your-family-password
@@ -52,7 +52,7 @@ NEXTAUTH_URL=http://your-server-ip:3000
 ```
 
 **Important:**
-- `EMBEDDING_DIMENSIONS` must match your model's output (768, 1024, 4096, etc.)
+- `EMBEDDING_DIMENSIONS` must match your model's actual output (768, 1024, 4096, etc.)
 - `NEXTAUTH_URL` must match how users access the site (e.g. `http://192.168.86.169:3000`)
 - `FAMILY_SHARED_SECRET` can be plain text or a bcrypt hash
 
@@ -65,62 +65,53 @@ docker compose up -d
 
 Use `--no-cache` on first build and after code changes.
 
-### 4. Load data via the web UI
+### 4. Load data
 
-1. Open `http://your-server-ip:3000` in a browser
-2. Log in with your family password
-3. Navigate to **Status & Ingestion** (in the top nav)
-4. Click the buttons in order:
-   - **Download Scriptures** → downloads OT, NT, BoM, D&C, PoGP (~30s)
-   - **Ingest Scriptures** → chunks and embeds into database (~5-10 min)
-   - **Download Supplementary** → scrapes conference, manuals, devotionals (~10-20 min)
-   - **Ingest Supplementary** → chunks and embeds supplementary content (~5-10 min)
-
-Data persists across restarts via Docker volumes.
-
-### 5. Start searching
-
-Go to the **Search** page and ask a question. Results are direct quotes with source citations.
-
-## CLI Alternative (Optional)
-
-You can also run ingestion from the terminal:
+Run these commands in order on your server:
 
 ```bash
-# Download scriptures
+# Step 1: Download scriptures (OT, NT, BoM, D&C, PoGP) — ~30s
 docker compose run --rm ingest python -m scripts.run_ingest download_bible
 
-# Ingest scriptures into database
+# Step 2: Ingest scriptures into database — ~5-10 min
 docker compose run --rm ingest python -m scripts.run_ingest scripture
 
-# Download supplementary content
+# Step 3 (optional): Download supplementary content — ~10-20 min
 docker compose run --rm ingest python -m scripts.run_ingest download_supplementary
 
-# Ingest supplementary content
+# Step 4 (optional): Ingest supplementary content — ~5-10 min
 docker compose run --rm ingest python -m scripts.run_ingest supplementary
 ```
 
-## Useful Commands
+**Note:** The ingest container uses a Docker volume (`ingestdata`) so downloaded files persist between runs.
+
+### 5. Verify and search
+
+1. Open `http://your-server-ip:3000`
+2. Log in with your family password
+3. Go to **Status** to verify: DB shows chunks, LLM shows Connected, Embeddings shows Connected
+4. Go to **Search** and ask a question
+
+## Available Ingestion Commands
 
 | Command | Description |
 |---------|-------------|
-| `docker compose up -d` | Start all services |
-| `docker compose down` | Stop all services |
-| `docker compose build --no-cache web` | Rebuild web app |
-| `docker compose logs -f web` | Watch web app logs |
-| `docker compose logs -f db` | Watch database logs |
+| `download_bible` | Download scriptures from GitHub |
+| `download_conference` | Download General Conference talks |
+| `download_supplementary` | Download CFM manuals, BYU devotionals, Gospel Topics |
+| `download_all` | Download everything above |
+| `scripture` | Ingest scriptures into database |
+| `conference` | Ingest conference talks into database |
+| `supplementary` | Ingest supplementary content into database |
+| `all` | Ingest everything (scripture + supplementary + conference) |
+
+Run as: `docker compose run --rm ingest python -m scripts.run_ingest <command>`
 
 ## Troubleshooting
 
-### "Server Error" on login
-```bash
-docker compose build --no-cache web
-docker compose up -d web
-```
-
 ### "No quotes found" on search
-Check the **Status** page:
-- If **Database** shows 0 chunks → run ingestion (Step 4 above)
+Go to the **Status** page:
+- If **Database** shows 0 chunks → run the ingestion commands above
 - If **LLM** or **Embeddings** shows Disconnected → check your AI server is running and `.env` URLs are correct
 
 ### Port 3000 already in use
@@ -129,16 +120,12 @@ lsof -i :3000
 ```
 Either kill that process or change `docker-compose.yml` to `ports: - "3001:3000"`.
 
-### Embedding dimension mismatch
-Verify your model's actual output:
+### Need to reset the database (schema changes)
 ```bash
-docker compose run --rm ingest python -c "
-from lib.llm import get_embedding
-e = get_embedding('test')
-print(f'Dimensions: {len(e)}')
-"
+docker compose down -v
+docker compose up -d
 ```
-Then update `EMBEDDING_DIMENSIONS` in `.env` to match.
+This destroys and recreates all volumes (you'll need to re-ingest data).
 
 ## Disclaimer
 

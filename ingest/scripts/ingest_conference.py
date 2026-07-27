@@ -95,7 +95,7 @@ def ingest_conference_talk(talk_data: dict):
         cur.execute(
             """INSERT INTO documents (title, author, date, source_type, official_status, doctrinal_weight, content_category, source_id)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT DO NOTHING
+               ON CONFLICT (title) DO NOTHING
                RETURNING id""",
             (title, speaker, date,
              CONFERENCE_CONFIG['source_type'], CONFERENCE_CONFIG['official_status'],

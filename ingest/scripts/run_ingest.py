@@ -37,10 +37,17 @@ def run_ingestion(target: str = 'all'):
         download_all()
         return
 
+    if target == 'download_conference':
+        from scripts.download_conference import download_conference_talks
+        download_conference_talks()
+        return
+
     if target == 'download_all':
         from scripts.download_scriptures import download_all_bible
         from scripts.download_supplementary import download_all
+        from scripts.download_conference import download_conference_talks
         download_all_bible()
+        download_conference_talks()
         download_all()
         return
 
@@ -66,6 +73,17 @@ def run_ingestion(target: str = 'all'):
             logger.error(f"Supplementary ingestion module not found: {e}")
         except Exception as e:
             logger.error(f"Supplementary ingestion failed: {e}")
+
+    if target in ('all', 'conference'):
+        try:
+            from scripts.ingest_supplementary import ingest_conference_talks
+            logger.info("Starting conference ingestion...")
+            ingest_conference_talks()
+            logger.info("Conference ingestion complete.")
+        except ImportError as e:
+            logger.error(f"Conference ingestion module not found: {e}")
+        except Exception as e:
+            logger.error(f"Conference ingestion failed: {e}")
 
     elapsed = time.time() - start
     logger.info(f"All ingestion complete in {elapsed:.1f}s")
