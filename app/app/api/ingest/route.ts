@@ -1,87 +1,102 @@
-import { NextRequest, NextResponse } from 'next/server';
-import pool from '@/lib/db';
-import { getEmbedding } from '@/lib/llm';
+import { NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const { document, chunks } = await req.json();
+    const body = await req.json();
+    const { action } = body;
 
-    if (!document || !chunks || !Array.isArray(chunks)) {
+    const validActions = ['download_bible', 'download_supplementary', 'scripture', 'supplementary', 'download_all', 'all'];
+    if (!action || !validActions.includes(action)) {
       return NextResponse.json(
-        { error: 'Document and chunks array required' },
+        { error: `Invalid action. Must be one of: ${validActions.join(', ')}` },
         { status: 400 }
       );
     }
 
-    const client = await pool.connect();
+    const { spawn } = await import('child_process');
 
-    try {
-      await client.query('BEGIN');
+    return new Promise<Response>((resolve) => {
+      const startTime = Date.now();
 
-      const docResult = await client.query(
-        `INSERT INTO documents (title, author, date, source_type, official_status, doctrinal_weight, content_category, source_id, raw_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT DO NOTHING
-         RETURNING id`,
-        [
-          document.title,
-          document.author || null,
-          document.date || null,
-          document.source_type,
-          document.official_status,
-          document.doctrinal_weight,
-          document.content_category,
-          document.source_id || null,
-          document.raw_url || null,
-        ]
-      );
-
-      let docId = docResult.rows[0]?.id;
-
-      if (!docId) {
-        const existing = await client.query(
-          'SELECT id FROM documents WHERE title = $1 AND content_category = $2',
-          [document.title, document.content_category]
-        );
-        docId = existing.rows[0]?.id;
-
-        if (!docId) {
-          await client.query('ROLLBACK');
-          return NextResponse.json(
-            { error: 'Could not find or create document' },
-            { status: 500 }
-          );
-        }
-      }
-
-      for (const chunk of chunks) {
-        const embedding = await getEmbedding(chunk.text);
-        const embeddingStr = `[${embedding.join(',')}]`;
-
-        await client.query(
-          `INSERT INTO chunks (document_id, text, embedding, page_number, verse_reference, overlap_index)
-           VALUES ($1, $2, $3::vector, $4, $5, $6)`,
-          [docId, chunk.text, embeddingStr, chunk.page_number || null, chunk.verse_reference || null, chunk.overlap_index || 0]
-        );
-      }
-
-      await client.query('COMMIT');
-
-      return NextResponse.json({
-        success: true,
-        document_id: docId,
-        chunks_indexed: chunks.length,
+      const proc = spawn('docker', [
+        'compose',
+        'run',
+        '--no-TTY',
+        '--rm',
+        'ingest',
+        'python',
+        '-m',
+        'scripts.run_ingest',
+        action,
+      ], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
       });
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
-  } catch (error) {
-    console.error('Ingest error:', error);
+
+      let output = '';
+      let errorOutput = '';
+
+      proc.stdout.on('data', (data: Buffer) => {
+        output += data.toString();
+      });
+
+      proc.stderr.on('data', (data: Buffer) => {
+        errorOutput += data.toString();
+      });
+
+      proc.on('close', (code) => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const fullOutput = (output + errorOutput).trim();
+
+        if (code === 0) {
+          resolve(NextResponse.json({
+            success: true,
+            action,
+            output: fullOutput,
+            elapsed: `${elapsed}s`,
+          }));
+        } else {
+          resolve(NextResponse.json(
+            {
+              success: false,
+              action,
+              output: fullOutput,
+              error: `Process exited with code ${code}`,
+              elapsed: `${elapsed}s`,
+            },
+            { status: 500 }
+          ));
+        }
+      });
+
+      proc.on('error', (err) => {
+        resolve(NextResponse.json(
+          {
+            success: false,
+            action,
+            error: err.message,
+            output: output || '',
+          },
+          { status: 500 }
+        ));
+      });
+
+      setTimeout(() => {
+        proc.kill('SIGTERM');
+        resolve(NextResponse.json(
+          {
+            success: false,
+            action,
+            error: 'Timed out after 300s',
+            output: output || '',
+          },
+          { status: 500 }
+        ));
+      }, 300000);
+    });
+  } catch (err: any) {
     return NextResponse.json(
-      { error: 'Ingestion failed', details: error instanceof Error ? error.message : 'Unknown error' },
+      { error: err.message },
       { status: 500 }
     );
   }

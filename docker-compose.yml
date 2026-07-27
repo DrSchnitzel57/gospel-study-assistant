@@ -37,7 +37,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ingestdata:/app/data
     restart: "no"
 
 volumes:
   pgdata:
+  ingestdata:

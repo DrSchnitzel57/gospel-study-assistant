@@ -6,10 +6,10 @@ import SourceToggle from './SourceToggle';
 
 const CATEGORIES = [
   { id: 'scripture', label: 'Scriptures', default: true },
-  { id: 'conference', label: 'General Conference', default: true },
-  { id: 'manual', label: 'Come, Follow Me', default: true },
-  { id: 'devotional', label: 'BYU Devotionals', default: true },
-  { id: 'history', label: 'Church History', default: false },
+  { id: 'conference', label: 'Conference', default: true },
+  { id: 'manual', label: 'Manuals', default: true },
+  { id: 'devotional', label: 'Devotionals', default: true },
+  { id: 'history', label: 'History', default: false },
 ];
 
 export default function SearchUI() {
@@ -17,6 +17,7 @@ export default function SearchUI() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [noResults, setNoResults] = useState(false);
+  const [error, setError] = useState('');
   const [historyMode, setHistoryMode] = useState(false);
   const [enabledCategories, setEnabledCategories] = useState<string[]>(
     CATEGORIES.filter(c => c.default).map(c => c.id)
@@ -28,6 +29,7 @@ export default function SearchUI() {
 
     setLoading(true);
     setNoResults(false);
+    setError('');
     setResults([]);
 
     try {
@@ -45,14 +47,19 @@ export default function SearchUI() {
 
       const data = await res.json();
 
+      if (!res.ok) {
+        setError(data.details || data.error || 'Search failed — check Status page for diagnostics');
+        return;
+      }
+
       if (data.no_results || !data.quotes || data.quotes.length === 0) {
         setNoResults(true);
         setResults([]);
       } else {
         setResults(data.quotes);
       }
-    } catch (err) {
-      console.error('Search failed:', err);
+    } catch (err: any) {
+      setError(err.message || 'Network error — check your connection');
     } finally {
       setLoading(false);
     }
@@ -67,20 +74,20 @@ export default function SearchUI() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <form onSubmit={handleSubmit} className="mb-8">
-        <div className="flex gap-3">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <form onSubmit={handleSubmit} className="mb-6">
+        <div className="flex flex-col sm:flex-row gap-3">
           <input
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder='Ask a question — e.g., "What did the Prophet teach about faith?"'
-            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 placeholder-gray-400"
+            placeholder='Ask a question about the gospel'
+            className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 placeholder-gray-400 text-base"
           />
           <button
             type="submit"
             disabled={loading || !query.trim()}
-            className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+            className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium whitespace-nowrap"
           >
             {loading ? 'Searching...' : 'Search'}
           </button>
@@ -100,13 +107,13 @@ export default function SearchUI() {
           </label>
           {historyMode && (
             <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-              Searches only official Church-approved history sources
+              Official history sources only
             </span>
           )}
         </div>
 
         {!historyMode && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 overflow-x-auto pb-1">
             {CATEGORIES.map(cat => (
               <SourceToggle
                 key={cat.id}
@@ -121,15 +128,21 @@ export default function SearchUI() {
 
       {loading && (
         <div className="text-center py-12">
-          <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+          <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
           <p className="mt-4 text-gray-500">Searching scriptures and resources...</p>
         </div>
       )}
 
-      {noResults && !loading && (
+      {error && !loading && (
+        <div className="text-center py-8 bg-red-50 rounded-lg border border-red-200">
+          <p className="text-red-700">{error}</p>
+        </div>
+      )}
+
+      {noResults && !loading && !error && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-600 text-lg">No direct quotes found for your query.</p>
-          <p className="text-gray-400 text-sm mt-2">Try rephrasing your question or enabling more source categories above.</p>
+          <p className="text-gray-400 text-sm mt-2">Try rephrasing or check the Status page to verify data is loaded.</p>
         </div>
       )}
 
