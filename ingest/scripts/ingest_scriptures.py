@@ -111,6 +111,22 @@ SCRIPTURE_CONFIG = {
 }
 
 
+def get_or_create_source(cur, scripture_key: str, config: dict):
+    """Get existing source or create it from config."""
+    slug = scripture_key
+    name = config['name']
+    cur.execute('SELECT id FROM sources WHERE slug = %s', (slug,))
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    cur.execute(
+        'INSERT INTO sources (slug, name, enabled_by_default, description) VALUES (%s, %s, %s, %s) ON CONFLICT (slug) DO NOTHING RETURNING id',
+        (slug, name, True, name)
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def ingest_scripture_from_text(scripture_key: str, book_name: str, text: str):
     """Ingest a single book/chapter of scripture from text with batch embeddings."""
     config = SCRIPTURE_CONFIG[scripture_key]
@@ -119,14 +135,12 @@ def ingest_scripture_from_text(scripture_key: str, book_name: str, text: str):
     cur = conn.cursor()
 
     try:
-        # Get source_id
-        cur.execute('SELECT id FROM sources WHERE slug = %s', (scripture_key,))
-        source_row = cur.fetchone()
-        if not source_row:
-            print(f"  Source '{scripture_key}' not found in DB. Skipping.")
+        # Get or create source_id
+        source_id = get_or_create_source(cur, scripture_key, config)
+        if not source_id:
+            print(f"  Could not find/create source '{scripture_key}'. Skipping.")
             return 0
-
-        source_id = source_row[0]
+        conn.commit()
 
         # Insert or get document
         cur.execute(
