@@ -4,7 +4,7 @@ import { registerTypes } from 'pgvector/pg';
 let poolInstance: Pool | null = null;
 let indexEnsured = false;
 
-async function ensureHnswIndex(): Promise<void> {
+async function ensureVectorIndex(): Promise<void> {
   if (indexEnsured) return;
   const pool = getPool();
   try {
@@ -25,11 +25,11 @@ async function ensureHnswIndex(): Promise<void> {
       "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'"
     );
     if (res.rows.length === 0) {
-      console.log('[DB] Creating HNSW index on chunks.embedding...');
+      console.log('[DB] Creating IVFFlat index on chunks.embedding...');
       await pool.query(
-        'CREATE INDEX idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops)'
+        'CREATE INDEX idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)'
       );
-      console.log('[DB] HNSW index created.');
+      console.log('[DB] IVFFlat index created.');
     }
   } catch (e) {
     console.error('[DB] Failed to ensure HNSW index:', e);
@@ -65,11 +65,11 @@ function getPool(): Pool {
 
 const pool = getPool();
 
-// Ensure HNSW index on startup (non-blocking)
+// Ensure vector index on startup (non-blocking)
 setImmediate(async () => {
   try {
     await pool.query('SELECT 1');
-    await ensureHnswIndex();
+    await ensureVectorIndex();
   } catch {
     // DB not ready yet, will retry on first search
   }

@@ -43,8 +43,9 @@ CREATE TABLE IF NOT EXISTS chunks (
 -- Full-text search index on chunk text
 CREATE INDEX IF NOT EXISTS idx_chunks_text_fts ON chunks USING GIN(to_tsvector('english', text));
 
--- Vector similarity index (HNSW for fast approximate search)
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
+-- Vector similarity index (IVFFlat, supports >2000 dimensions)
+-- HNSW has a 2000-dim limit, so IVFFlat is required for 4096-dim embeddings
+CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- Source type index for filtering
 CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(content_category);

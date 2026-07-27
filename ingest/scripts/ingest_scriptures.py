@@ -18,8 +18,13 @@ EMBEDDING_BATCH_SIZE = 64
 enc = tiktoken.get_encoding("cl100k_base")
 
 
+_schema_ensured = False
+
 def ensure_schema(cur):
     """Ensure required constraints and indexes exist (handles stale pgdata volumes)."""
+    global _schema_ensured
+    if _schema_ensured:
+        return
     cur.execute(
         "SELECT 1 FROM pg_constraint WHERE conname = 'sources_slug_key'"
     )
@@ -46,16 +51,20 @@ def ensure_schema(cur):
             "ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(4096)"
         )
         print("[Ingest] Embedding column altered.")
-    # Ensure HNSW vector index exists for fast similarity search
+    # Ensure IVFFlat vector index exists (HNSW has 2000-dim limit, we use 4096)
     cur.execute(
         "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'"
     )
     if not cur.fetchone():
-        print("[Ingest] Creating HNSW index on chunks.embedding...")
-        cur.execute(
-            "CREATE INDEX idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops)"
-        )
-        print("[Ingest] HNSW index created.")
+        try:
+            print("[Ingest] Creating IVFFlat index on chunks.embedding...")
+            cur.execute(
+                "CREATE INDEX idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
+            )
+            print("[Ingest] IVFFlat index created.")
+        except Exception as e:
+            print(f"[Ingest] Index creation failed (will use seq scan): {e}")
+    _schema_ensured = True
 
 
 def get_db_connection():

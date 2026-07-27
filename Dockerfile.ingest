@@ -18,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 
 COPY ingest/ ./
 
-CMD ["python", "-m", "scripts.run_ingest"]
+# No CMD — ingest runs manually via: docker compose run --rm ingest python -m scripts.run_ingest
