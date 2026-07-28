@@ -10,9 +10,7 @@ export async function GET() {
         official_status,
         doctrinal_weight,
         COUNT(*) as document_count,
-        SUM(
-          SELECT COUNT(*) FROM chunks WHERE chunks.document_id = documents.id
-        ) as chunk_count
+        (SELECT COUNT(*) FROM chunks WHERE chunks.document_id = documents.id) as chunk_count
       FROM documents
       GROUP BY content_category, source_type, official_status, doctrinal_weight
       ORDER BY content_category

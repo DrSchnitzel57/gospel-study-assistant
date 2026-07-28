@@ -55,7 +55,7 @@ def extract_page_text(page, min_length=200) -> str:
                 # Strip nav/footer/sidebar within content
                 for remove_sel in ['nav', 'footer', 'header', 'aside', '.nav', '.sidebar']:
                     for child in el.query_selector_all(remove_sel):
-                        child.inner_html('')
+                        child.evaluate('el => el.innerHTML = ""')
                 text = clean_text(el.inner_html())
                 if len(text) > min_length:
                     return text
@@ -65,7 +65,7 @@ def extract_page_text(page, min_length=200) -> str:
         if body:
             for selector in ['nav', 'footer', 'header', 'aside']:
                 for el in body.query_selector_all(selector):
-                    el.inner_html('')
+                    el.evaluate('el => el.innerHTML = ""')
             text = clean_text(body.inner_html())
             if len(text) > min_length:
                 return text

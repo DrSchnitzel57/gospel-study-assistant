@@ -46,7 +46,7 @@ def extract_talk_text(page) -> str:
             # Remove navigation, footer, sidebar elements
             for selector in ['nav', 'footer', 'header', 'aside', '.nav', '.footer', '.sidebar']:
                 for el in body.query_selector_all(selector):
-                    el.inner_html('')
+                    el.evaluate('el => el.innerHTML = ""')
             text = clean_text(body.inner_html())
             if len(text) > 200:
                 return text

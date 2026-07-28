@@ -2,14 +2,14 @@ import OpenAI from 'openai';
 
 // LLM endpoint (chat completions)
 const LLM_BASE_URL = process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
-const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || 'default-key';
+const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 const LLM_MODEL = process.env.LLM_MODEL || 'qwen-3.6-27b';
 
 // Embedding endpoint (vector embeddings)
 const EMBEDDING_BASE_URL = process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
-const EMBEDDING_API_KEY = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || 'default-key';
+const EMBEDDING_API_KEY = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || '';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
-const EMBEDDING_DIMENSIONS = parseInt(process.env.EMBEDDING_DIMENSIONS || '768');
+const EMBEDDING_DIMENSIONS = parseInt(process.env.EMBEDDING_DIMENSIONS || '4096', 10);
 
 const llmClient = new OpenAI({
   baseURL: LLM_BASE_URL,
@@ -41,6 +41,9 @@ export async function getEmbedding(text: string): Promise<number[]> {
   });
   const elapsed = Date.now() - t0;
 
+  if (!response.data || response.data.length === 0) {
+    throw new Error('Embedding API returned empty data array');
+  }
   const embedding = response.data[0].embedding;
   console.log(`[Embedding] dims=${embedding.length}, model=${EMBEDDING_MODEL}, time=${elapsed}ms`);
 
@@ -64,5 +67,8 @@ export async function callLLM(messages: Array<{ role: string; content: string }>
     timeout: 120000,
   });
 
+  if (!response.choices || response.choices.length === 0) {
+    throw new Error('LLM API returned empty choices array');
+  }
   return response.choices[0].message.content || '';
 }

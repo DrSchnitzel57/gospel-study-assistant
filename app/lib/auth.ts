@@ -2,7 +2,11 @@ import { compare } from 'bcryptjs';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import NextAuth from 'next-auth';
 
-const sharedSecret = process.env.FAMILY_SHARED_SECRET || '';
+const sharedSecret = process.env.FAMILY_SHARED_SECRET;
+
+if (!sharedSecret) {
+  throw new Error('FAMILY_SHARED_SECRET environment variable is required');
+}
 
 export const { handlers, auth } = NextAuth({
   trustHost: true,
@@ -17,12 +21,10 @@ export const { handlers, auth } = NextAuth({
 
         const inputPassword = credentials.password as string;
 
-        // Support both plain-text and bcrypt-hashed shared secrets
         if (sharedSecret.startsWith('$2')) {
           const valid = await compare(inputPassword, sharedSecret);
           if (!valid) return null;
         } else if (inputPassword === sharedSecret) {
-          // Plain text match
         } else {
           return null;
         }

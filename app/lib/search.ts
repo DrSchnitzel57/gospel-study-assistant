@@ -1,6 +1,6 @@
 import pool from '@/lib/db';
 import { getEmbedding, callLLM, getConfig } from '@/lib/llm';
-import { extractJSONFromLLMOutput, validateLLMResponse, type Quote, type LLMResponse } from '@/lib/validation';
+import { extractJSONFromLLMOutput, validateLLMResponse, type Quote } from '@/lib/validation';
 
 export const SYSTEM_PROMPT = `You are a scripture and Church resource retrieval assistant for members of The Church of Jesus Christ of Latter-day Saints.
 
@@ -175,7 +175,13 @@ export function validateQuotesAgainstChunks(
   });
 }
 
-export async function search(query: string, filters: any = {}) {
+export async function search(query: string, filters: {
+  categories?: string[];
+  sourceTypes?: string[];
+  officialStatuses?: string[];
+  doctrinalWeights?: string[];
+  historyMode?: boolean;
+} = {}) {
   const t0 = Date.now();
 
   console.log(`[Search] Query: "${query.slice(0, 80)}"...`);

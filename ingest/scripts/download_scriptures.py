@@ -133,7 +133,7 @@ def save_texts(texts: dict, target_dir: str):
 
         safe_name = re.sub(r'[^\w\s\-]', '', book_name)
         safe_name = re.sub(r'\s+', '-', safe_name)
-        output_path = BASE_DIR / target_dir / f'{book_name}.txt'
+        output_path = BASE_DIR / target_dir / f'{safe_name}.txt'
 
         if output_path.exists() and output_path.stat().st_size > 200:
             saved += 1

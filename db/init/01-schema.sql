@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 -- Chunks table (text segments with embeddings)
--- embedding must have fixed dimensions for HNSW index to work
+-- embedding must have fixed dimensions for vector index to work
+-- dimension must match EMBEDDING_DIMENSIONS env var (default 4096)
 CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

@@ -3,7 +3,11 @@ import pool from '@/lib/db';
 import { getConfig } from '@/lib/llm';
 
 export async function GET() {
-  const status: any = {
+  const status: {
+    db: { connected: boolean; chunks: number; documents: number; categories: Record<string, number>; lastIngested: string | null; error?: string };
+    llm: { connected: boolean; model: string; baseUrl: string; pingTime: number | null; error?: string };
+    embedding: { connected: boolean; model: string; baseUrl: string; dimensions: number; pingTime: number | null; error?: string };
+  } = {
     db: { connected: false, chunks: 0, documents: 0, categories: {}, lastIngested: null },
     llm: { connected: false, model: '', baseUrl: '', pingTime: null },
     embedding: { connected: false, model: '', baseUrl: '', dimensions: 0, pingTime: null },
@@ -11,16 +15,16 @@ export async function GET() {
 
   try {
     const chunkCount = await pool.query('SELECT COUNT(*) as count FROM chunks');
-    status.db.chunks = parseInt(chunkCount.rows[0].count);
+    status.db.chunks = parseInt(chunkCount.rows[0].count, 10);
 
     const docCount = await pool.query('SELECT COUNT(*) as count FROM documents');
-    status.db.documents = parseInt(docCount.rows[0].count);
+    status.db.documents = parseInt(docCount.rows[0].count, 10);
 
     const catResult = await pool.query(
       'SELECT content_category, COUNT(*) as count FROM chunks GROUP BY content_category ORDER BY count DESC'
     );
     status.db.categories = Object.fromEntries(
-      catResult.rows.map((r: any) => [r.content_category, parseInt(r.count)])
+      catResult.rows.map((r: any) => [r.content_category, parseInt(r.count, 10)])
     );
 
     const lastResult = await pool.query('SELECT MAX(created_at) as last FROM chunks');
@@ -43,7 +47,7 @@ export async function GET() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || 'default-key'}`,
+        'Authorization': `Bearer ${process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || ''}`,
       },
       body: JSON.stringify({
         model: config.llmModel,
@@ -64,7 +68,7 @@ export async function GET() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || 'default-key'}`,
+        'Authorization': `Bearer ${process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || ''}`,
       },
       body: JSON.stringify({
         model: config.embeddingModel,

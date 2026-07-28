@@ -4,19 +4,18 @@ Reads text files from ingest/data/ and chunks + embeds them into PostgreSQL.
 """
 
 import os
-import re
-import json
 import glob
 import sys
 import psycopg2
-from psycopg2.extras import execute_values
 from pgvector.psycopg2 import register_vector
 import tiktoken
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 from llm import get_embeddings
 
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://gospel:gospelpass@db:5432/gospel_db')
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if not DATABASE_URL:
+    raise ValueError('DATABASE_URL environment variable is required')
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 EMBEDDING_BATCH_SIZE = 64
@@ -48,19 +47,19 @@ def ensure_schema(cur):
         cur.execute(
             "ALTER TABLE documents ADD CONSTRAINT documents_title_key UNIQUE (title)"
         )
-    # Ensure embedding column has fixed dimensions (required for HNSW index)
+    embedding_dims = int(os.environ.get('EMBEDDING_DIMENSIONS', '4096'))
     cur.execute(
         """SELECT atttypmod FROM pg_attribute
            WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'"""
     )
     row = cur.fetchone()
     if row and row[0] == -1:
-        print("[Ingest] Altering embedding column to vector(4096)...")
+        print(f"[Ingest] Altering embedding column to vector({embedding_dims})...")
         cur.execute(
-            "ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(4096)"
+            f"ALTER TABLE chunks ALTER COLUMN embedding TYPE vector({embedding_dims})"
         )
         print("[Ingest] Embedding column altered.")
-    # Ensure IVFFlat vector index exists (HNSW has 2000-dim limit, we use 4096)
+    # Ensure IVFFlat vector index exists (HNSW has 2000-dim limit)
     cur.execute(
         "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'"
     )

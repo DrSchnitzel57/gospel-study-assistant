@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import QuoteCard from './QuoteCard';
 import SourceToggle from './SourceToggle';
+import type { Quote } from '@/lib/validation';
 
 const CATEGORIES = [
   { id: 'scripture', label: 'Scriptures', default: true },
@@ -14,7 +15,7 @@ const CATEGORIES = [
 
 export default function SearchUI() {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(false);
   const [noResults, setNoResults] = useState(false);
   const [error, setError] = useState('');
@@ -151,7 +152,7 @@ export default function SearchUI() {
           <p className="text-sm text-gray-500 mb-4">
             Found {results.length} direct quote{results.length !== 1 ? 's' : ''}
           </p>
-          {results.map((quote: any, index: number) => (
+          {results.map((quote: Quote, index: number) => (
             <QuoteCard key={index} quote={quote} />
           ))}
         </div>

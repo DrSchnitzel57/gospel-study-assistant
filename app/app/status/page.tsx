@@ -23,15 +23,20 @@ export default function StatusPage() {
   const [status, setStatus] = useState<StatusData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
   const loadStatus = useCallback(async () => {
+    setFetchError(null);
     try {
       const res = await fetch('/api/status');
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
+      } else {
+        setFetchError(`Server returned ${res.status}`);
       }
-    } catch {
-      // ignore
+    } catch (err: unknown) {
+      setFetchError(err instanceof Error ? err.message : 'Failed to load status');
     } finally {
       setLoading(false);
     }
@@ -47,6 +52,20 @@ export default function StatusPage() {
         <div className="flex items-center gap-3">
           <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
           <span className="text-gray-600">Loading status...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (fetchError && !status) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="text-center py-8 bg-red-50 rounded-lg border border-red-200">
+          <p className="text-red-700 font-medium">Failed to load status</p>
+          <p className="text-red-500 text-sm mt-1">{fetchError}</p>
+          <button onClick={loadStatus} className="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-light transition-colors">
+            Retry
+          </button>
         </div>
       </div>
     );
