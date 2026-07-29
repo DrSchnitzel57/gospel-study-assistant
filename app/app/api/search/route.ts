@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { search, isGreetingOrOffTopic } from '@/lib/search';
+import { search } from '@/lib/search';
 
 export async function POST(req: Request) {
   try {
@@ -13,22 +13,11 @@ export async function POST(req: Request) {
       );
     }
 
-    // Reject queries that are too long (DoS protection)
     if (query.trim().length > 1000) {
       return NextResponse.json(
         { error: 'Query is too long (max 1000 characters)' },
         { status: 400 }
       );
-    }
-
-    // Early exit for greetings - don't waste embedding/LLM calls
-    if (isGreetingOrOffTopic(query.trim())) {
-      return NextResponse.json({
-        quotes: [],
-        no_results: true,
-        greeting: true,
-        message: 'I can help with gospel questions. Try asking about a scripture, doctrine, or Church topic.',
-      });
     }
 
     const result = await search(query.trim(), filters || {});

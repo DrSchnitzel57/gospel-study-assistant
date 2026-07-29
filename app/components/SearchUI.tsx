@@ -19,7 +19,6 @@ export default function SearchUI() {
   const [loading, setLoading] = useState(false);
   const [noResults, setNoResults] = useState(false);
   const [error, setError] = useState('');
-  const [greeting, setGreeting] = useState('');
   const [historyMode, setHistoryMode] = useState(false);
   const [enabledCategories, setEnabledCategories] = useState<string[]>(
     CATEGORIES.filter(c => c.default).map(c => c.id)
@@ -42,7 +41,6 @@ export default function SearchUI() {
     setLoadingTime(0);
     setNoResults(false);
     setError('');
-    setGreeting('');
     setResults([]);
 
     // Start loading timer for user feedback
@@ -68,11 +66,6 @@ export default function SearchUI() {
 
       if (!res.ok) {
         setError(data.details || data.error || 'Search failed — check Status page for diagnostics');
-        return;
-      }
-
-      if (data.greeting) {
-        setGreeting(data.message || 'I can help with gospel questions. Try asking about a scripture, doctrine, or Church topic.');
         return;
       }
 
@@ -172,19 +165,13 @@ export default function SearchUI() {
         </div>
       )}
 
-      {greeting && !loading && (
-        <div className="text-center py-8 bg-blue-50 rounded-lg border border-blue-200">
-          <p className="text-blue-700">{greeting}</p>
-        </div>
-      )}
-
       {error && !loading && (
         <div className="text-center py-8 bg-red-50 rounded-lg border border-red-200">
           <p className="text-red-700">{error}</p>
         </div>
       )}
 
-      {noResults && !loading && !error && !greeting && (
+      {noResults && !loading && !error && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-600 text-lg">No direct quotes found for your query.</p>
           <p className="text-gray-400 text-sm mt-2">

@@ -2,38 +2,9 @@ import pool from '@/lib/db';
 import { getEmbedding, callLLM, getConfig } from '@/lib/llm';
 import { extractJSONFromLLMOutput, validateLLMResponse, type Quote } from '@/lib/validation';
 
-const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.25');
-const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '3', 10);
-const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '20', 10);
-
-const GREETING_PATTERNS = [
-  /^hello\b/i, /^hi\b/i, /^hey\b/i, /^good\s+(morning|afternoon|evening)/i,
-  /^howdy/i, /^greetings/i, /^what'?s\s+up/i, /^sup\b/i,
-];
-
-const GOSPEL_KEYWORDS = [
-  'jesus', 'christ', 'god', 'scripture', 'bible', 'mormon', 'lds', 'church',
-  'faith', 'prayer', 'salvation', 'repentance', 'baptism', 'covenant', 'temple',
-  'revelation', 'prophet', 'apostle', 'atonement', 'resurrection', 'gospel',
-  'doctrine', 'commandment', 'testimony', 'spirit', 'holy', 'baptism',
-  'restoration', 'mormon', 'book of mormon', 'd&c', 'doctrine and covenants',
-  'temple', 'ordinance', 'sealing', 'eternal', 'family', 'plan of salvation',
-  'pre-mortal', 'kingdom', 'zion', 'covenant path', 'living worthily',
-  'scrupulosity', 'ocd', 'anxiety', 'doubt', 'temptation', 'sin', 'forgiveness',
-  'mercy', 'grace', 'charity', 'hope', 'patience', 'humility', 'obedience',
-  'trust', 'worship', 'sacrifice', 'offering', 'fasting', 'tithing',
-  'missionary', 'mission', 'calling', 'stewardship', 'service', 'charity',
-  'neighbor', 'poor', 'widow', 'orphan', 'stranger', 'latter-day',
-];
-
-export function isGreetingOrOffTopic(query: string): boolean {
-  if (GREETING_PATTERNS.some(p => p.test(query))) return true;
-  const words = query.toLowerCase().split(/\s+/);
-  if (words.length <= 2) {
-    return !GOSPEL_KEYWORDS.some(kw => query.toLowerCase().includes(kw));
-  }
-  return false;
-}
+const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
+const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '1', 10);
+const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '10', 10);
 
 export const SYSTEM_PROMPT = `You are a scripture and Church resource retrieval assistant for members of The Church of Jesus Christ of Latter-day Saints.
 
@@ -240,24 +211,12 @@ export async function search(query: string, filters: {
 } = {}) {
   const t0 = Date.now();
 
-  // Early exit for greetings and off-topic queries
-  if (isGreetingOrOffTopic(query)) {
-    console.log(`[Search] Query appears to be a greeting/off-topic: "${query.slice(0, 80)}"`);
-    return { quotes: [], no_results: true, greeting: true };
-  }
-
   console.log(`[Search] Query: "${query.slice(0, 80)}"...`);
   const chunks = await searchChunks(query, filters);
   console.log(`[Search] Found ${chunks.length} relevant chunks in ${Date.now() - t0}ms`);
 
   if (chunks.length === 0) {
     console.log('[Search] No relevant chunks found (below similarity threshold), returning no_results');
-    return { quotes: [], no_results: true };
-  }
-
-  // Don't call LLM if we don't have enough relevant chunks
-  if (chunks.length < MIN_CHUNKS_FOR_LLM) {
-    console.log(`[Search] Only ${chunks.length} relevant chunks (min ${MIN_CHUNKS_FOR_LLM}), returning no_results`);
     return { quotes: [], no_results: true };
   }
 

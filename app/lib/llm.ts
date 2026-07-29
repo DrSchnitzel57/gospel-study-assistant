@@ -4,7 +4,7 @@ import OpenAI from 'openai';
 const LLM_BASE_URL = process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 const LLM_MODEL = process.env.LLM_MODEL || 'qwen-3.6-27b';
-const LLM_TIMEOUT = parseInt(process.env.LLM_TIMEOUT || '45000', 10);
+const LLM_TIMEOUT = parseInt(process.env.LLM_TIMEOUT || '120000', 10);
 
 // Embedding endpoint (vector embeddings)
 const EMBEDDING_BASE_URL = process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
