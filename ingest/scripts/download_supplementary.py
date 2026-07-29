@@ -1,443 +1,222 @@
 """
 Downloads BYU devotionals, Come Follow Me manuals, and Gospel Topics.
-Uses Playwright for all JS-rendered pages.
+Uses Requests and BeautifulSoup to fetch Server-Side Rendered (SSR) HTML.
+Bypasses the Playwright networkidle timeouts and Akamai JS challenges.
 """
-
 import os
 import re
 import json
 import time
+import requests
+from bs4 import BeautifulSoup
 from pathlib import Path
-from playwright.sync_api import sync_playwright
 
 BASE_DIR = Path(__file__).parent.parent / 'data'
 BASE_URL = 'https://www.churchofjesuschrist.org'
 
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
+
+KNOWN_TOPIC_SLUGS = [
+    'baptism', 'children-of-god', 'christian-doctrine', 'church-discipline',
+    'common-core-biblical-and-mormon-doctrines', 'd-and-c-6', 'death-and-foreordination',
+    'doctrine-and-covenants', 'earth-and-its-inhabitants', 'faith', 'faith-jesus-christ',
+    'family', 'family-proclamation', 'first-amendment', 'freedom-of-religion', 
+    'gathering-of-israel', 'gospel-of-jesus-christ', 'holy-bible', 'jesus-christ',
+    'joseph-smith', 'joseph-smith-first-vision', 'plan-of-salvation', 'priesthood', 
+    'restoration-of-the-church', 'the-book-of-mormon', 'the-temple', 'word-of-wisdom'
+]
 
 def ensure_dirs():
     (BASE_DIR / 'manuals').mkdir(parents=True, exist_ok=True)
     (BASE_DIR / 'devotionals').mkdir(parents=True, exist_ok=True)
     (BASE_DIR / 'history').mkdir(parents=True, exist_ok=True)
 
-
-def clean_text(html_content: str) -> str:
-    """Strip HTML tags and clean up whitespace."""
-    text = re.sub(r'<[^>]+>', ' ', html_content)
+def extract_text(html: str) -> str:
+    soup = BeautifulSoup(html, 'html.parser')
+    main = soup.find('main') or soup.find('article') or soup.find('body')
+    if not main: return ''
+    
+    for tag in main(['nav', 'footer', 'header', 'aside', 'script', 'style', 'figure', 'button', 'img', 'svg']):
+        tag.decompose()
+        
+    text = main.get_text(separator='\n', strip=True)
     text = re.sub(r'\n{3,}', '\n\n', text)
-    text = re.sub(r'[ \t]+', ' ', text)
     return text.strip()
 
-
-def extract_text_from_page(page, min_length=200) -> str:
-    """Extract main content text from a page using Playwright."""
-    try:
-        page.wait_for_timeout(3000)
-
-        # Try article/main content area first
-        for selector in ['article', 'main', '[class*="content"]', '[class*="transcript"]', '[class*="body"]']:
-            el = page.query_selector(selector)
-            if el:
-                # Strip nav/footer/sidebar within content
-                for remove_sel in ['nav', 'footer', 'header', 'aside', '.nav', '.sidebar']:
-                    for child in el.query_selector_all(remove_sel):
-                        child.evaluate('el => el.innerHTML = ""')
-                text = clean_text(el.inner_html())
-                if len(text) > min_length:
-                    return text
-
-        # Fallback: body with nav/footer removed
-        body = page.query_selector('body')
-        if body:
-            for selector in ['nav', 'footer', 'header', 'aside']:
-                for el in body.query_selector_all(selector):
-                    el.evaluate('el => el.innerHTML = ""')
-            text = clean_text(body.inner_html())
-            if len(text) > min_length:
-                return text
-
-    except Exception as e:
-        print(f"    Error extracting text: {e}")
-
-    return ''
-
-
-# ─── Gospel Topics Essays ──────────────────────────────────────────────────────
-
-# Known Gospel Topics essay slugs (from churchofjesuschrist.org)
-KNOWN_TOPIC_SLUGS = [
-    'baptism', 'children-of-god', 'christian-doctrine', 'church-discipline',
-    'common-core-biblical-and-mormon-doctrines', 'd-and-c-6', 'death-and-foreordination',
-    'doctrine-and-covenants', 'earth-and-its-inhabitants', 'faith', 'faith-jesus-christ',
-    'family', 'family-proclamation', 'family-search-and-ordainces', 'first-amendment',
-    'freedom-of-religion', 'gathering-of-israel', 'gospel-of-jesus-christ',
-    'holy-bible', 'how-to-read-the-book-of-mormon', 'human-body', 'humankind-and-the-fall',
-    'jesus-christ', 'jesus-christ-and-other-sons-and-daughters-of-heavenly-parents',
-    'jesus-christ-the-only-son', 'joseph-smith', 'joseph-smith-first-vision',
-    'joseph-smith-latter-day-prophet', 'latter-day-restoration', 'lds-charities',
-    'living-prophet', 'marriage-and-family', 'mercy-and-judgment', 'missionary-work',
-    'money-and-material-things', 'mormon', 'mormon-polygamy', 'original-language-records',
-    'pearl-of-great-price', 'plan-of-salvation', 'priesthood', 'priesthood-ordination-women',
-    'race-and-race-relations', 'remnant-of-jacob', 'restoration-of-the-church',
-    'role-of-the-church', 'scriptures', 'sin-and-the-atonement', 'temple-ordinances',
-    'the-book-of-mormon', 'the-church-today', 'the-gathering', 'the-gospel',
-    'the-living-church', 'the-restoration', 'the-roles-of-men-and-women',
-    'the-temple', 'translation-of-the-book-of-mormon', 'trinitarian-doctrine',
-    'when-and-where-will-jesus-christ-come-again', 'why-the-church-teaches-what-it-teaches',
-    'women-and-priesthood', 'word-of-wisdom',
-]
-
 def download_gospel_topics() -> int:
-    """Download Gospel Topics Essays using Playwright."""
     print("\n=== Downloading Gospel Topics ===")
-
     all_essays = []
     saved = 0
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    
+    topic_links = [f'{BASE_URL}/study/gospel-topics/{slug}?lang=eng' for slug in KNOWN_TOPIC_SLUGS]
+    print(f"  Downloading {len(topic_links)} known topics...")
 
-    # Try multiple listing page URLs
-    listing_urls = [
-        f'{BASE_URL}/study/gospel-topics?lang=eng',
-        f'{BASE_URL}/study/topics?lang=eng',
-    ]
+    for i, topic_url in enumerate(topic_links):
+        try:
+            resp = session.get(topic_url, timeout=30)
+            if resp.status_code != 200: continue
+            
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            title_elem = soup.find('h1')
+            title = title_elem.get_text(strip=True) if title_elem else f"Topic {i+1}"
+            
+            text = extract_text(resp.text)
+            if len(text) > 200:
+                safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
+                safe_title = re.sub(r'\s+', '-', safe_title)
+                output_path = BASE_DIR / 'history' / f'Topic_{safe_title}.txt'
+                
+                content = f"Title: {title}\nURL: {topic_url}\n\n{text}"
+                output_path.write_text(content, encoding='utf-8')
+                
+                all_essays.append({'title': title, 'url': topic_url, 'file': str(output_path)})
+                saved += 1
+                print(f"    [{i+1}/{len(topic_links)}] {title[:40]}... OK")
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"    [{i+1}/{len(topic_links)}] ERROR: {e}")
 
-    topic_links = []
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            viewport={'width': 1920, 'height': 1080},
-        )
-        page = context.new_page()
-
-        # Try to find links from listing pages
-        for listing_url in listing_urls:
-            try:
-                print(f"  Trying listing: {listing_url}")
-                page.goto(listing_url, wait_until='networkidle', timeout=60000)
-                page.wait_for_timeout(3000)
-
-                found_links = []
-                for link_elem in page.query_selector_all('a[href]'):
-                    href = link_elem.get_attribute('href') or ''
-                    # Try multiple patterns
-                    if any(pattern in href for pattern in ['/gospel-topics/', '/topics/']) and not href.startswith('#'):
-                        if href.startswith('/'):
-                            href = BASE_URL + href
-                        if '?lang=' not in href:
-                            href += '?lang=eng'
-                        found_links.append(href)
-
-                found_links = list(dict.fromkeys(found_links))
-                print(f"    Found {len(found_links)} links from {listing_url}")
-                topic_links.extend(found_links)
-
-            except Exception as e:
-                print(f"    Failed: {e}")
-
-        # If no links found from listing, use known slugs
-        if not topic_links:
-            print("  No links found from listing pages, using known topic slugs...")
-            topic_links = [
-                f'{BASE_URL}/study/gospel-topics/{slug}?lang=eng'
-                for slug in KNOWN_TOPIC_SLUGS
-            ]
-
-        topic_links = list(dict.fromkeys(topic_links))
-        print(f"  Total topics to download: {len(topic_links)}")
-
-        for i, topic_url in enumerate(topic_links):
-            try:
-                page.goto(topic_url, wait_until='networkidle', timeout=60000)
-                page.wait_for_timeout(3000)
-
-                # Extract title
-                h1 = page.query_selector('h1')
-                title = f'Topic {i+1}'
-                if h1:
-                    title = h1.inner_text().strip()
-
-                # Extract content
-                text = extract_text_from_page(page)
-
-                if text and len(text) > 200:
-                    safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
-                    safe_title = re.sub(r'\s+', '-', safe_title)
-                    output_path = BASE_DIR / 'history' / f'Topic_{safe_title}.txt'
-
-                    content = f"Title: {title}\n"
-                    content += f"URL: {topic_url}\n\n"
-                    content += text
-
-                    output_path.write_text(content, encoding='utf-8')
-                    all_essays.append({
-                        'title': title,
-                        'url': topic_url,
-                        'file': str(output_path),
-                    })
-                    saved += 1
-                    print(f"    [{i+1}/{len(topic_links)}] {title[:40]}... OK")
-                else:
-                    print(f"    [{i+1}/{len(topic_links)}] {title[:40]}... SKIPPED (no text)")
-
-                time.sleep(1)
-
-            except Exception as e:
-                print(f"    [{i+1}/{len(topic_links)}] ERROR: {e}")
-                continue
-
-        browser.close()
-
-    # Save index
     index_path = BASE_DIR / 'history' / 'topics_index.json'
     index_path.write_text(json.dumps(all_essays, indent=2), encoding='utf-8')
-
-    print(f"\n  Gospel Topics: {saved} essays downloaded")
     return saved
-
-
-# ─── Come, Follow Me Manuals ───────────────────────────────────────────────────
 
 def download_cfm_manuals() -> int:
-    """Download Come, Follow Me manuals using Playwright."""
     print("\n=== Downloading Come, Follow Me Manuals ===")
-
     all_lessons = []
     saved = 0
-
+    session = requests.Session()
+    session.headers.update(HEADERS)
+    
     years = ['2024', '2025']
     seasons = ['01', '04', '07', '10']
-    audiences = ['individual-family']
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            viewport={'width': 1920, 'height': 1080},
-        )
-        page = context.new_page()
-
-        for year in years:
-            for season in seasons:
-                period = f'{year}/{season}'
-                print(f"\n  Period: {period}")
-
-                for audience in audiences:
-                    listing_url = f'{BASE_URL}/study/come-follow-me/{audience}/{period}?lang=eng'
-
+    
+    for year in years:
+        for season in seasons:
+            period = f'{year}/{season}'
+            print(f"\n  Period: {period}")
+            
+            listing_url = f'{BASE_URL}/study/come-follow-me/home-and-church/{year}/{season}?lang=eng'
+            
+            try:
+                resp = session.get(listing_url, timeout=30)
+                if resp.status_code != 200:
+                    listing_url = f'{BASE_URL}/study/come-follow-me/individual-family/{year}/{season}?lang=eng'
+                    resp = session.get(listing_url, timeout=30)
+                
+                soup = BeautifulSoup(resp.text, 'html.parser')
+                
+                lesson_links = []
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if '/come-follow-me/' in href and period in href and len(href.split('/')) > 6:
+                        if href.startswith('/'): href = BASE_URL + href
+                        if '?lang=' not in href: href += '?lang=eng'
+                        lesson_links.append(href)
+                        
+                lesson_links = list(dict.fromkeys(lesson_links))
+                print(f"    Found {len(lesson_links)} lessons")
+                
+                for i, lesson_url in enumerate(lesson_links):
                     try:
-                        page.goto(listing_url, wait_until='networkidle', timeout=60000)
-                        page.wait_for_timeout(3000)
-
-                        # Extract lesson links - try multiple patterns
-                        lesson_links = []
-                        for link_elem in page.query_selector_all('a[href]'):
-                            href = link_elem.get_attribute('href') or ''
-                            if '/come-follow-me/' in href:
-                                # Skip navigation links, only get lesson pages
-                                if f'/{period}' in href and ('/week-' in href or '/lesson-' in href or len(href.split('/')) > 8):
-                                    if href.startswith('/'):
-                                        href = BASE_URL + href
-                                    if '?lang=' not in href:
-                                        href += '?lang=eng'
-                                    lesson_links.append(href)
-
-                        lesson_links = list(dict.fromkeys(lesson_links))
-                        print(f"    Found {len(lesson_links)} lessons")
-
-                        for i, lesson_url in enumerate(lesson_links):
-                            try:
-                                page.goto(lesson_url, wait_until='networkidle', timeout=60000)
-                                page.wait_for_timeout(3000)
-
-                                # Extract title
-                                h1 = page.query_selector('h1')
-                                title = f'Lesson {i+1}'
-                                if h1:
-                                    title = h1.inner_text().strip()
-
-                                # Extract content
-                                text = extract_text_from_page(page)
-
-                                if text and len(text) > 200:
-                                    safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
-                                    safe_title = re.sub(r'\s+', '-', safe_title)
-                                    output_path = BASE_DIR / 'manuals' / f'CFM_{period}_{safe_title}.txt'
-
-                                    content = f"Title: {title}\n"
-                                    content += f"Period: {period}\n"
-                                    content += f"URL: {lesson_url}\n\n"
-                                    content += text
-
-                                    output_path.write_text(content, encoding='utf-8')
-                                    all_lessons.append({
-                                        'title': title,
-                                        'period': period,
-                                        'url': lesson_url,
-                                        'file': str(output_path),
-                                    })
-                                    saved += 1
-                                    print(f"      [{i+1}/{len(lesson_links)}] {title[:40]}... OK")
-                                else:
-                                    print(f"      [{i+1}/{len(lesson_links)}] {title[:40]}... SKIPPED")
-
-                                time.sleep(1)
-
-                            except Exception as e:
-                                print(f"      [{i+1}/{len(lesson_links)}] ERROR: {e}")
-                                continue
-
+                        l_resp = session.get(lesson_url, timeout=30)
+                        l_soup = BeautifulSoup(l_resp.text, 'html.parser')
+                        title_elem = l_soup.find('h1')
+                        title = title_elem.get_text(strip=True) if title_elem else f"Lesson {i+1}"
+                        
+                        text = extract_text(l_resp.text)
+                        if len(text) > 200:
+                            safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
+                            safe_title = re.sub(r'\s+', '-', safe_title)
+                            output_path = BASE_DIR / 'manuals' / f'CFM_{period.replace("/", "_")}_{safe_title}.txt'
+                            content = f"Title: {title}\nPeriod: {period}\nURL: {lesson_url}\n\n{text}"
+                            output_path.write_text(content, encoding='utf-8')
+                            all_lessons.append({'title': title, 'period': period, 'url': lesson_url, 'file': str(output_path)})
+                            saved += 1
+                            print(f"      [{i+1}/{len(lesson_links)}] {title[:40]}... OK")
+                        time.sleep(0.5)
                     except Exception as e:
-                        print(f"    Error fetching listing: {e}")
-                        continue
-
-        browser.close()
-
-    # Save index
+                        print(f"      [{i+1}/{len(lesson_links)}] ERROR: {e}")
+            except Exception as e:
+                print(f"    Error fetching listing: {e}")
+                
     index_path = BASE_DIR / 'manuals' / 'cfm_index.json'
     index_path.write_text(json.dumps(all_lessons, indent=2), encoding='utf-8')
-
-    print(f"\n  CFM Manuals: {saved} lessons downloaded")
     return saved
-
-
-# ─── BYU Speeches ──────────────────────────────────────────────────────────────
 
 def download_byu_speeches() -> int:
-    """Download BYU devotionals/speeches using Playwright."""
     print("\n=== Downloading BYU Speeches ===")
-
     all_devotionals = []
     saved = 0
-
-    # BYU Speeches uses a JS-rendered site - must use Playwright
+    session = requests.Session()
+    session.headers.update(HEADERS)
     byu_base = 'https://speeches.byu.edu'
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            viewport={'width': 1920, 'height': 1080},
-        )
-        page = context.new_page()
-
-        try:
-            # Try the speeches listing page
-            page.goto(f'{byu_base}/speeches', wait_until='networkidle', timeout=60000)
-            page.wait_for_timeout(3000)
-
-            # Extract speech links - try multiple patterns
-            speech_links = []
-            for link_elem in page.query_selector_all('a[href]'):
-                href = link_elem.get_attribute('href') or ''
-                if any(p in href for p in ['/talks/', '/speeches/', '/speech/', '/devotional/']):
-                    # Skip navigation links (short paths like /talks/, /popular/, etc.)
-                    if len(href.split('/')) < 4:
-                        continue
-                    if href.startswith('/'):
-                        href = byu_base + href
-                    elif href.startswith('http'):
-                        pass
-                    else:
-                        href = byu_base + '/' + href
-                    speech_links.append(href)
-
-            speech_links = list(dict.fromkeys(speech_links))[:50]
-            print(f"  Found {len(speech_links)} speeches")
-
-            for i, speech_url in enumerate(speech_links):
-                try:
-                    page.goto(speech_url, wait_until='networkidle', timeout=60000)
-                    page.wait_for_timeout(3000)
-
-                    # Extract title
-                    h1 = page.query_selector('h1')
-                    title = 'BYU Speech'
-                    if h1:
-                        title = h1.inner_text().strip()
-
-                    # Extract speaker
-                    speaker = 'Unknown'
-                    speaker_elem = page.query_selector(
-                        '[class*="speaker"], [class*="author"], [class*="byline"], '
-                        'meta[name="author"]'
-                    )
-                    if speaker_elem:
-                        speaker = speaker_elem.inner_text().strip()
-
-                    # Extract date
-                    date_str = ''
-                    time_elem = page.query_selector('time')
-                    if time_elem:
-                        date_str = time_elem.get_attribute('datetime') or time_elem.inner_text().strip()
-
-                    # Extract content
-                    text = extract_text_from_page(page)
-
-                    if text and len(text) > 200:
-                        safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
-                        safe_title = re.sub(r'\s+', '-', safe_title)
-                        output_path = BASE_DIR / 'devotionals' / f'BYU_{safe_title}.txt'
-
-                        content = f"Title: {title}\n"
-                        content += f"Speaker: {speaker}\n"
-                        content += f"Date: {date_str}\n"
-                        content += f"URL: {speech_url}\n\n"
-                        content += text
-
-                        output_path.write_text(content, encoding='utf-8')
-                        all_devotionals.append({
-                            'title': title,
-                            'speaker': speaker,
-                            'date': date_str,
-                            'url': speech_url,
-                            'file': str(output_path),
-                        })
-                        saved += 1
-                        print(f"    [{i+1}/{len(speech_links)}] {title[:40]}... OK")
-                    else:
-                        print(f"    [{i+1}/{len(speech_links)}] {title[:40]}... SKIPPED")
-
-                    time.sleep(1)
-
-                except Exception as e:
-                    print(f"    [{i+1}/{len(speech_links)}] ERROR: {e}")
-                    continue
-
-        except Exception as e:
-            print(f"  Error fetching BYU speeches: {e}")
-
-        browser.close()
-
-    # Save index
+    
+    try:
+        resp = session.get(f'{byu_base}/speeches', timeout=30)
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        
+        speech_links = []
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            if '/talks/' in href and len(href.split('/')) > 4:
+                if not href.startswith('http'): href = byu_base + href
+                speech_links.append(href)
+                
+        speech_links = list(dict.fromkeys(speech_links))[:25]
+        print(f"  Found {len(speech_links)} speeches")
+        
+        for i, speech_url in enumerate(speech_links):
+            try:
+                s_resp = session.get(speech_url, timeout=30)
+                s_soup = BeautifulSoup(s_resp.text, 'html.parser')
+                
+                title_elem = s_soup.find('h1')
+                title = title_elem.get_text(strip=True) if title_elem else "BYU Speech"
+                
+                speaker = "Unknown"
+                speaker_elem = s_soup.find(class_=re.compile(r'speaker|author|byline', re.I))
+                if speaker_elem: speaker = speaker_elem.get_text(strip=True)
+                
+                text = extract_text(s_resp.text)
+                if len(text) > 200:
+                    safe_title = re.sub(r'[^\w\s-]', '', title)[:80]
+                    safe_title = re.sub(r'\s+', '-', safe_title)
+                    output_path = BASE_DIR / 'devotionals' / f'BYU_{safe_title}.txt'
+                    content = f"Title: {title}\nSpeaker: {speaker}\nURL: {speech_url}\n\n{text}"
+                    output_path.write_text(content, encoding='utf-8')
+                    all_devotionals.append({'title': title, 'speaker': speaker, 'url': speech_url, 'file': str(output_path)})
+                    saved += 1
+                    print(f"    [{i+1}/{len(speech_links)}] {title[:40]}... OK")
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"    [{i+1}/{len(speech_links)}] ERROR: {e}")
+                
+    except Exception as e:
+        print(f"  Error fetching BYU speeches: {e}")
+        
     index_path = BASE_DIR / 'devotionals' / 'byu_index.json'
     index_path.write_text(json.dumps(all_devotionals, indent=2), encoding='utf-8')
-
-    print(f"\n  BYU Speeches: {saved} downloaded")
     return saved
 
-
-# ─── Main Entry Point ──────────────────────────────────────────────────────────
-
 def download_all():
-    """Download all supplementary materials."""
     ensure_dirs()
-
     print("=" * 60)
-    print("  Gospel Study Assistant — Supplementary Data Downloader")
-    print("  (Playwright headless browser)")
+    print("  Gospel Study Assistant - Supplementary Downloader (Requests/BS4)")
     print("=" * 60)
-
     cfm_count = download_cfm_manuals()
     byu_count = download_byu_speeches()
     topics_count = download_gospel_topics()
-
     print(f"\n{'=' * 60}")
     print(f"  CFM Manuals:     {cfm_count}")
     print(f"  BYU Speeches:    {byu_count}")
     print(f"  Gospel Topics:   {topics_count}")
-    print(f"  Files saved to:  {BASE_DIR}")
     print("=" * 60)
-
 
 if __name__ == '__main__':
     download_all()
