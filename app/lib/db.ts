@@ -41,10 +41,7 @@ async function ensureVectorIndex(): Promise<void> {
 function getPool(): Pool {
   if (poolInstance) return poolInstance;
 
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error('DATABASE_URL environment variable is required');
-  }
+  const databaseUrl = process.env.DATABASE_URL || 'postgresql://gospel:gospelpass@db:5432/gospel_db';
   poolInstance = new Pool({
     connectionString: databaseUrl,
     max: 20,
