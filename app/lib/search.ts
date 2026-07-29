@@ -2,9 +2,56 @@ import pool from '@/lib/db';
 import { getEmbedding, callLLM, getConfig } from '@/lib/llm';
 import { extractJSONFromLLMOutput, validateLLMResponse, type Quote } from '@/lib/validation';
 
-const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
+const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.10');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '1', 10);
-const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '8', 10);
+const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '15', 10);
+
+const QUERY_EXPANSIONS: Record<string, string[]> = {
+  // Mental health / psychological conditions
+  scrupulosity: ['anxiety about sin', 'fear of wrongdoing', 'overly conscientious', 'peace of mind', 'religious anxiety'],
+  ocd: ['obsessive thoughts', 'compulsion', 'repetition', 'peace of mind', 'control thoughts', 'worry'],
+  anxiety: ['fear', 'worry', 'peace', 'trust', 'comfort', 'strength', 'calm', 'anxious'],
+  depression: ['despair', 'hope', 'joy', 'sadness', 'comfort', 'healing', 'darkness', 'light', 'grief'],
+  addiction: ['temptation', 'bondage', 'weakness', 'strength', 'freedom', 'recovery', 'habit', 'power'],
+  trauma: ['suffering', 'pain', 'healing', 'comfort', 'restoration', 'brokenness', 'wounds'],
+  grief: ['mourning', 'loss', 'death', 'comfort', 'sorrow', 'tears', 'bereavement'],
+  loneliness: ['isolated', 'alone', 'companionship', 'friendship', 'belonging', 'community'],
+  anger: ['wrath', 'fury', 'patience', 'forgiveness', 'temper', 'rage', 'peace'],
+  envy: ['jealousy', 'comparison', 'contentment', 'gratitude', 'pride', 'humility'],
+  shame: ['guilt', 'worthiness', 'unworthiness', 'self-worth', 'dignity', 'worth', 'atonement'],
+  fear: ['anxiety', 'worry', 'courage', 'bold', 'trust', 'peace', 'comfort', 'strength'],
+  doubt: ['faith', 'uncertainty', 'questioning', 'belief', 'testimony', 'evidence'],
+  stress: ['burden', 'weight', 'pressure', 'rest', 'peace', 'comfort', 'strength'],
+  burnout: ['exhaustion', 'weariness', 'rest', 'renewal', 'strength', 'burden'],
+  'self-harm': ['self destruction', 'hopelessness', 'suffering', 'healing', 'worth', 'value'],
+  suicide: ['despair', 'hopelessness', 'end life', 'worth', 'value', 'purpose', 'reason to live'],
+  'eating disorder': ['body image', 'control food', 'perfection', 'self worth', 'appearance'],
+  phobia: ['fear', 'anxiety', 'courage', 'bold', 'peace', 'comfort'],
+  insomnia: ['sleep', 'rest', 'peace', 'comfort', 'quiet mind', 'worry at night'],
+  panic: ['fear', 'anxiety', 'overwhelm', 'peace', 'calm', 'strength'],
+  perfectionism: ['perfection', 'flawless', 'mistakes', 'mercy', 'grace', 'progress', 'good enough'],
+  procrastination: ['delay', 'laziness', 'diligence', 'work', 'purpose', 'action'],
+  codependency: ['dependency', 'codependent', 'boundaries', 'enable', 'self sacrifice', 'love others'],
+};
+
+export function expandQuery(query: string): string {
+  const lowerQuery = query.toLowerCase();
+  const expansions: string[] = [];
+
+  for (const [term, expandedTerms] of Object.entries(QUERY_EXPANSIONS)) {
+    if (lowerQuery.includes(term)) {
+      expansions.push(...expandedTerms);
+    }
+  }
+
+  if (expansions.length === 0) {
+    return query;
+  }
+
+  const expanded = `${query} ${[...new Set(expansions)].join(' ')}`;
+  console.log(`[Search] Query expanded: "${query}" -> "${expanded}"`);
+  return expanded;
+}
 
 export const SYSTEM_PROMPT = `You are a scripture and Church resource retrieval assistant for members of The Church of Jesus Christ of Latter-day Saints.
 
@@ -66,6 +113,7 @@ export function buildUserPrompt(
 
 export async function searchChunks(
   query: string,
+  searchQuery?: string,
   filters: {
     categories?: string[];
     sourceTypes?: string[];
@@ -84,7 +132,8 @@ export async function searchChunks(
   content_category: string;
   similarity: number;
 }>> {
-  const embedding = await getEmbedding(query);
+  const embeddingQuery = searchQuery || query;
+  const embedding = await getEmbedding(embeddingQuery);
   const embeddingStr = `[${embedding.join(',')}]`;
 
   let whereClauses: string[] = [];
@@ -212,7 +261,8 @@ export async function search(query: string, filters: {
   const t0 = Date.now();
 
   console.log(`[Search] Query: "${query.slice(0, 80)}"...`);
-  const chunks = await searchChunks(query, filters);
+  const expandedQuery = expandQuery(query);
+  const chunks = await searchChunks(query, expandedQuery, filters);
   console.log(`[Search] Found ${chunks.length} relevant chunks in ${Date.now() - t0}ms`);
 
   if (chunks.length === 0) {
