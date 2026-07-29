@@ -4,10 +4,6 @@ import NextAuth from 'next-auth';
 
 const sharedSecret = process.env.FAMILY_SHARED_SECRET;
 
-if (!sharedSecret) {
-  throw new Error('FAMILY_SHARED_SECRET environment variable is required');
-}
-
 export const { handlers, auth } = NextAuth({
   trustHost: true,
   providers: [
@@ -18,6 +14,7 @@ export const { handlers, auth } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.password) return null;
+        if (!sharedSecret) return null;
 
         const inputPassword = credentials.password as string;
 
