@@ -4,26 +4,26 @@ import { extractJSONFromLLMOutput, validateLLMResponse, type Quote } from '@/lib
 
 const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '1', 10);
-const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '10', 10);
+const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '20', 10);
 
 export const SYSTEM_PROMPT = `You are a scripture and Church resource retrieval assistant for members of The Church of Jesus Christ of Latter-day Saints.
 
-CRITICAL RULES - VIOLATING THESE IS UNACCEPTABLE:
+YOUR TASK: Extract relevant direct quotes from the provided context chunks that relate to the user's query.
 
-1. OUTPUT ONLY DIRECT QUOTES from the provided context chunks. Never paraphrase, summarize, or synthesize.
-2. Every quote must be a verbatim excerpt from one of the provided chunks.
-3. Each quote must include its exact source attribution (book, chapter, verse, or talk title and date).
-4. If no relevant direct quote exists in the provided chunks, set "no_results" to true and return an empty quotes array.
-5. NEVER fabricate, invent, or hallucinate a quote that does not appear in the provided context.
-6. NEVER provide your own interpretation, commentary, or theological analysis.
-7. NEVER combine multiple sources into a synthesized answer.
-8. Output must be valid JSON matching the specified schema.
+GUIDELINES:
+- Extract quotes that are relevant to the user's question or topic
+- Quotes should be meaningful passages (at least a sentence or two)
+- Include the source attribution for each quote
+- Aim to return as many relevant quotes as possible (up to 20)
+- If a chunk contains relevant content, extract the key passage as a quote
+- Do not fabricate quotes that do not appear in the context
+- If no relevant content exists, set "no_results" to true
 
 OUTPUT FORMAT - Return ONLY this JSON structure:
 {
   "quotes": [
     {
-      "quote": "The exact verbatim text from the source",
+      "quote": "The text from the source",
       "source": "Book of Mormon / Conference Talk Title / Manual Name",
       "source_type": "primary or secondary",
       "official_status": "official or unofficial",
@@ -35,7 +35,7 @@ OUTPUT FORMAT - Return ONLY this JSON structure:
   "no_results": false
 }
 
-The user's query is provided below. The context chunks with their metadata follow the query. Return only direct quotes from these chunks.`;
+The user's query is provided below. The context chunks with their metadata follow the query. Extract all relevant quotes.`;
 
 export function buildUserPrompt(
   query: string,
@@ -60,7 +60,7 @@ export function buildUserPrompt(
     prompt += `Text: ${chunk.text}\n\n`;
   });
 
-  prompt += `\nReturn only direct quotes from the chunks above that are relevant to the user's query. Maximum 10 quotes. If no relevant quotes exist, set no_results to true.`;
+  prompt += `\nExtract all relevant quotes from the chunks above that relate to the user's query. Return up to 20 quotes. Be generous in what you consider relevant. If no relevant quotes exist, set no_results to true.`;
   return prompt;
 }
 
@@ -176,25 +176,25 @@ export function validateQuotesAgainstChunks(
   return quotes.filter(quote => {
     const normalizedQuote = quote.quote.toLowerCase().trim();
 
-    // Very short quotes (< 10 chars) are always accepted
-    if (normalizedQuote.length < 10) return true;
+    // Very short quotes (< 8 chars) are always accepted
+    if (normalizedQuote.length < 8) return true;
 
     return chunks.some(chunk => {
       const normalizedChunk = chunk.text.toLowerCase().trim();
 
-      // Try sliding window substring match (more robust than prefix-only)
-      for (let len = Math.min(normalizedQuote.length, 80); len >= 12; len -= 3) {
-        for (let start = 0; start <= normalizedQuote.length - len; start += 3) {
+      // Try sliding window substring match
+      for (let len = Math.min(normalizedQuote.length, 60); len >= 10; len -= 2) {
+        for (let start = 0; start <= normalizedQuote.length - len; start += 2) {
           const substring = normalizedQuote.slice(start, start + len);
           if (normalizedChunk.includes(substring)) return true;
         }
       }
 
-      // Fallback: check word overlap (3+ consecutive words)
+      // Fallback: check word overlap (2+ consecutive words)
       const quoteWords = normalizedQuote.split(/\s+/);
-      for (let i = 0; i <= quoteWords.length - 3; i++) {
-        const phrase = quoteWords.slice(i, i + 3).join(' ');
-        if (phrase.length > 8 && normalizedChunk.includes(phrase)) return true;
+      for (let i = 0; i <= quoteWords.length - 2; i++) {
+        const phrase = quoteWords.slice(i, i + 2).join(' ');
+        if (phrase.length > 6 && normalizedChunk.includes(phrase)) return true;
       }
 
       return false;

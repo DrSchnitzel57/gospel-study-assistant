@@ -113,8 +113,8 @@ def download_gospel_topics() -> int:
         for listing_url in listing_urls:
             try:
                 print(f"  Trying listing: {listing_url}")
-                page.goto(listing_url, wait_until='domcontentloaded', timeout=60000)
-                page.wait_for_timeout(8000)
+                page.goto(listing_url, wait_until='networkidle', timeout=60000)
+                page.wait_for_timeout(3000)
 
                 found_links = []
                 for link_elem in page.query_selector_all('a[href]'):
@@ -147,7 +147,7 @@ def download_gospel_topics() -> int:
 
         for i, topic_url in enumerate(topic_links):
             try:
-                page.goto(topic_url, wait_until='domcontentloaded', timeout=60000)
+                page.goto(topic_url, wait_until='networkidle', timeout=60000)
                 page.wait_for_timeout(3000)
 
                 # Extract title
@@ -225,8 +225,8 @@ def download_cfm_manuals() -> int:
                     listing_url = f'{BASE_URL}/study/come-follow-me/{audience}/{period}?lang=eng'
 
                     try:
-                        page.goto(listing_url, wait_until='domcontentloaded', timeout=60000)
-                        page.wait_for_timeout(5000)
+                        page.goto(listing_url, wait_until='networkidle', timeout=60000)
+                        page.wait_for_timeout(3000)
 
                         # Extract lesson links - try multiple patterns
                         lesson_links = []
@@ -246,7 +246,7 @@ def download_cfm_manuals() -> int:
 
                         for i, lesson_url in enumerate(lesson_links):
                             try:
-                                page.goto(lesson_url, wait_until='domcontentloaded', timeout=60000)
+                                page.goto(lesson_url, wait_until='networkidle', timeout=60000)
                                 page.wait_for_timeout(3000)
 
                                 # Extract title
@@ -322,14 +322,17 @@ def download_byu_speeches() -> int:
 
         try:
             # Try the speeches listing page
-            page.goto(f'{byu_base}/speeches', wait_until='domcontentloaded', timeout=60000)
-            page.wait_for_timeout(5000)
+            page.goto(f'{byu_base}/speeches', wait_until='networkidle', timeout=60000)
+            page.wait_for_timeout(3000)
 
-            # Extract speech links
+            # Extract speech links - try multiple patterns
             speech_links = []
             for link_elem in page.query_selector_all('a[href]'):
                 href = link_elem.get_attribute('href') or ''
-                if '/speeches/' in href or '/speech/' in href or '/devotional/' in href:
+                if any(p in href for p in ['/talks/', '/speeches/', '/speech/', '/devotional/']):
+                    # Skip navigation links (short paths like /talks/, /popular/, etc.)
+                    if len(href.split('/')) < 4:
+                        continue
                     if href.startswith('/'):
                         href = byu_base + href
                     elif href.startswith('http'):
@@ -343,7 +346,7 @@ def download_byu_speeches() -> int:
 
             for i, speech_url in enumerate(speech_links):
                 try:
-                    page.goto(speech_url, wait_until='domcontentloaded', timeout=60000)
+                    page.goto(speech_url, wait_until='networkidle', timeout=60000)
                     page.wait_for_timeout(3000)
 
                     # Extract title
