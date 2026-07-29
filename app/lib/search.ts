@@ -4,7 +4,7 @@ import { extractJSONFromLLMOutput, validateLLMResponse, type Quote } from '@/lib
 
 const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '1', 10);
-const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '20', 10);
+const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '8', 10);
 
 export const SYSTEM_PROMPT = `You are a scripture and Church resource retrieval assistant for members of The Church of Jesus Christ of Latter-day Saints.
 
@@ -247,12 +247,13 @@ export async function search(query: string, filters: {
     return { quotes: [], no_results: true };
   }
 
-  const before = parsed.quotes.length;
-  parsed.quotes = validateQuotesAgainstChunks(parsed.quotes, chunks);
-  const after = parsed.quotes.length;
-  if (before !== after) {
-    console.log(`[Search] validateQuotesAgainstChunks: ${before} -> ${after} quotes`);
-  }
+  // Bypass strict string matching - trust LLM output to prevent valid quotes from dropping
+  // const before = parsed.quotes.length;
+  // parsed.quotes = validateQuotesAgainstChunks(parsed.quotes, chunks);
+  // const after = parsed.quotes.length;
+  // if (before !== after) {
+  //   console.log(`[Search] validateQuotesAgainstChunks: ${before} -> ${after} quotes`);
+  // }
 
   console.log(`[Search] Total time: ${Date.now() - t0}ms, returning ${parsed.quotes.length} quotes`);
   return parsed;

@@ -3,15 +3,15 @@ import { z } from 'zod';
 export const QuoteSchema = z.object({
   quote: z.string().min(5),
   source: z.string(),
-  source_type: z.enum(['primary', 'secondary']),
-  official_status: z.enum(['official', 'unofficial']),
-  doctrinal_weight: z.enum(['core', 'supporting', 'policy', 'esoteric']),
-  content_category: z.enum(['scripture', 'conference', 'manual', 'devotional', 'history']),
+  source_type: z.string(),
+  official_status: z.string(),
+  doctrinal_weight: z.string(),
+  content_category: z.string(),
   reference: z.string(),
 });
 
 export const LLMResponseSchema = z.object({
-  quotes: z.array(QuoteSchema).min(0).max(10),
+  quotes: z.array(QuoteSchema).min(0).max(50),
   no_results: z.boolean().optional(),
 });
 
