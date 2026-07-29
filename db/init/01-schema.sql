@@ -28,8 +28,18 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 -- Chunks table (text segments with embeddings)
--- embedding must have fixed dimensions for vector index to work
--- dimension must match EMBEDDING_DIMENSIONS env var (default 1024)
+--
+-- The `embedding` column is created with a default of vector(1024).
+-- At runtime, the application and ingest scripts check the actual column
+-- dimension via `atttypmod` and will ALTER the column to match the
+-- EMBEDDING_DIMENSIONS environment variable if needed. This allows a
+-- single schema file to work with different embedding models:
+--
+--   768  — nomic-embed-text, BERT-based models
+--   1024 — text-embedding-3-small, bge-large (default)
+--   4096 — Qwen3-Embedding-8B, Ollama embedding models
+--
+-- Set EMBEDDING_DIMENSIONS in your .env file to match your model's output.
 CREATE TABLE IF NOT EXISTS chunks (
     id SERIAL PRIMARY KEY,
     document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

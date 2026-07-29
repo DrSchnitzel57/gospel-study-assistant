@@ -1,4 +1,5 @@
 import { compare } from 'bcryptjs';
+import { timingSafeEqual } from 'crypto';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import NextAuth from 'next-auth';
 
@@ -21,9 +22,17 @@ export const { handlers, auth } = NextAuth({
         if (sharedSecret.startsWith('$2')) {
           const valid = await compare(inputPassword, sharedSecret);
           if (!valid) return null;
-        } else if (inputPassword === sharedSecret) {
         } else {
-          return null;
+          const inputBuffer = Buffer.from(inputPassword, 'utf8');
+          const secretBuffer = Buffer.from(sharedSecret, 'utf8');
+
+          if (inputBuffer.length !== secretBuffer.length) {
+            return null;
+          }
+
+          if (!timingSafeEqual(inputBuffer, secretBuffer)) {
+            return null;
+          }
         }
 
         return { id: 'family', name: 'Family' };

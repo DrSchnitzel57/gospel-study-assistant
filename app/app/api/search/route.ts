@@ -1,8 +1,37 @@
 import { NextResponse } from 'next/server';
 import { search } from '@/lib/search';
 
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const MAX_REQUESTS_PER_WINDOW = 20;
+const ipRequestCounts = new Map<string, { count: number; windowStart: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const record = ipRequestCounts.get(ip);
+
+  if (!record || now - record.windowStart > RATE_LIMIT_WINDOW_MS) {
+    ipRequestCounts.set(ip, { count: 1, windowStart: now });
+    return false;
+  }
+
+  if (record.count >= MAX_REQUESTS_PER_WINDOW) {
+    return true;
+  }
+
+  record.count += 1;
+  return false;
+}
+
 export async function POST(req: Request) {
   try {
+    const ip = req.headers.get('x-forwarded-for') || 'default-client';
+    if (isRateLimited(ip)) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait a moment before searching again.' },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const { query, filters } = body;
 

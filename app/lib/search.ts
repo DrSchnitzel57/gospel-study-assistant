@@ -1,7 +1,8 @@
 import pool from '@/lib/db';
 import { getEmbedding, callLLM, getConfig } from '@/lib/llm';
-import { extractJSONFromLLMOutput, validateLLMResponse, type Quote } from '@/lib/validation';
+import { extractJSONFromLLMOutput, validateLLMResponse, validateQuotesAgainstChunks, type Quote } from '@/lib/validation';
 
+const MAX_CONTEXT_CHARS = 24000;
 const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.10');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '1', 10);
 const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '15', 10);
@@ -32,6 +33,18 @@ const QUERY_EXPANSIONS: Record<string, string[]> = {
   perfectionism: ['perfection', 'flawless', 'mistakes', 'mercy', 'grace', 'progress', 'good enough'],
   procrastination: ['delay', 'laziness', 'diligence', 'work', 'purpose', 'action'],
   codependency: ['dependency', 'codependent', 'boundaries', 'enable', 'self sacrifice', 'love others'],
+
+  // Core LDS Doctrinal & Theological Expansions
+  grace: ['mercy', 'enabling power', 'redemption', 'gift of god', 'favor', 'jesus christ', 'salvation'],
+  atonement: ['sacrifice', 'redemption', 'jesus christ', 'reconciliation', 'forgiveness', 'resurrection', 'healing'],
+  covenant: ['promise', 'binding agreement', 'ordinance', 'sacred obligation', 'baptism', 'temple', 'faithfulness'],
+  temple: ['house of the lord', 'holy place', 'endowment', 'sealing', 'covenants', 'ordinances', 'eternal family'],
+  priesthood: ['power of god', 'authority', 'keys', 'ordinances', 'melchizedek', 'aaronic', 'service'],
+  tithing: ['tenth', 'consecration', 'offerings', 'blessings of heaven', 'windows of heaven', 'sacrifice'],
+  sabbath: ['holy day', 'day of rest', 'sacrament', 'worship', 'delight', 'keep holy'],
+  repentance: ['change of heart', 'turn to god', 'forgiveness', 'confess', 'forsake', 'mercy'],
+  revelation: ['holy ghost', 'inspiration', 'spirit', 'still small voice', 'guidance', 'personal revelation'],
+  sacrament: ['remembrance', 'bread and water', 'covenant', 'body and blood', 'renew covenants'],
 };
 
 export function expandQuery(query: string): string {
@@ -99,13 +112,29 @@ export function buildUserPrompt(
   let prompt = `USER QUERY: ${query}\n\n`;
   prompt += `CONTEXT CHUNKS:\n\n`;
 
-  chunks.forEach((chunk, i) => {
-    prompt += `--- CHUNK ${i + 1} ---\n`;
-    prompt += `Source: ${chunk.source}\n`;
-    prompt += `Reference: ${chunk.reference}\n`;
-    prompt += `Type: ${chunk.source_type} | Status: ${chunk.official_status} | Weight: ${chunk.doctrinal_weight} | Category: ${chunk.content_category}\n`;
-    prompt += `Text: ${chunk.text}\n\n`;
-  });
+  let totalChars = 0;
+  let includedChunks = 0;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const chunkSection =
+      `--- CHUNK ${i + 1} ---\n` +
+      `Source: ${chunk.source}\n` +
+      `Reference: ${chunk.reference}\n` +
+      `Type: ${chunk.source_type} | Status: ${chunk.official_status} | Weight: ${chunk.doctrinal_weight} | Category: ${chunk.content_category}\n` +
+      `Text: ${chunk.text}\n\n`;
+
+    if (totalChars + chunkSection.length > MAX_CONTEXT_CHARS && includedChunks > 0) {
+      console.log(
+        `[Search] Reached max context character budget (${MAX_CONTEXT_CHARS}). Included ${includedChunks}/${chunks.length} chunks.`
+      );
+      break;
+    }
+
+    prompt += chunkSection;
+    totalChars += chunkSection.length;
+    includedChunks++;
+  }
 
   prompt += `\nExtract all relevant quotes from the chunks above that relate to the user's query. Return up to 20 quotes. Be generous in what you consider relevant. If no relevant quotes exist, set no_results to true.`;
   return prompt;
@@ -218,39 +247,6 @@ export async function searchChunks(
   return relevantChunks.slice(0, MAX_CHUNKS);
 }
 
-export function validateQuotesAgainstChunks(
-  quotes: Quote[],
-  chunks: Array<{ text: string }>
-): Quote[] {
-  return quotes.filter(quote => {
-    const normalizedQuote = quote.quote.toLowerCase().trim();
-
-    // Very short quotes (< 8 chars) are always accepted
-    if (normalizedQuote.length < 8) return true;
-
-    return chunks.some(chunk => {
-      const normalizedChunk = chunk.text.toLowerCase().trim();
-
-      // Try sliding window substring match
-      for (let len = Math.min(normalizedQuote.length, 60); len >= 10; len -= 2) {
-        for (let start = 0; start <= normalizedQuote.length - len; start += 2) {
-          const substring = normalizedQuote.slice(start, start + len);
-          if (normalizedChunk.includes(substring)) return true;
-        }
-      }
-
-      // Fallback: check word overlap (2+ consecutive words)
-      const quoteWords = normalizedQuote.split(/\s+/);
-      for (let i = 0; i <= quoteWords.length - 2; i++) {
-        const phrase = quoteWords.slice(i, i + 2).join(' ');
-        if (phrase.length > 6 && normalizedChunk.includes(phrase)) return true;
-      }
-
-      return false;
-    });
-  });
-}
-
 export async function search(query: string, filters: {
   categories?: string[];
   sourceTypes?: string[];
@@ -297,13 +293,15 @@ export async function search(query: string, filters: {
     return { quotes: [], no_results: true };
   }
 
-  // Bypass strict string matching - trust LLM output to prevent valid quotes from dropping
-  // const before = parsed.quotes.length;
-  // parsed.quotes = validateQuotesAgainstChunks(parsed.quotes, chunks);
-  // const after = parsed.quotes.length;
-  // if (before !== after) {
-  //   console.log(`[Search] validateQuotesAgainstChunks: ${before} -> ${after} quotes`);
-  // }
+  const beforeCount = parsed.quotes.length;
+  parsed.quotes = validateQuotesAgainstChunks(parsed.quotes, chunks);
+  const afterCount = parsed.quotes.length;
+
+  if (beforeCount !== afterCount) {
+    console.log(
+      `[Search] Hallucination guard: Filtered ${beforeCount - afterCount} unverified quote(s)`
+    );
+  }
 
   console.log(`[Search] Total time: ${Date.now() - t0}ms, returning ${parsed.quotes.length} quotes`);
   return parsed;

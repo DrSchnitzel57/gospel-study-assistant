@@ -41,3 +41,36 @@ export function extractJSONFromLLMOutput(output: string): string {
 
   return output;
 }
+
+export function validateQuotesAgainstChunks(
+  quotes: Quote[],
+  chunks: Array<{ text: string }>
+): Quote[] {
+  return quotes.filter((quote) => {
+    const cleanQuoteWords = quote.quote
+      .toLowerCase()
+      .replace(/[^\w\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2);
+
+    if (cleanQuoteWords.length < 3) return true;
+
+    return chunks.some((chunk) => {
+      const cleanChunkText = chunk.text
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ');
+
+      const chunkWordsSet = new Set(cleanChunkText.split(/\s+/));
+      let matchCount = 0;
+
+      for (const word of cleanQuoteWords) {
+        if (chunkWordsSet.has(word)) {
+          matchCount++;
+        }
+      }
+
+      const matchRatio = matchCount / cleanQuoteWords.length;
+      return matchRatio >= 0.8;
+    });
+  });
+}

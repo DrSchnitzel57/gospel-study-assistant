@@ -26,11 +26,19 @@ async function ensureVectorIndex(): Promise<void> {
       "SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'"
     );
     if (res.rows.length === 0) {
-      console.log('[DB] Creating IVFFlat index on chunks.embedding...');
-      await pool.query(
-        'CREATE INDEX idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)'
-      );
-      console.log('[DB] IVFFlat index created.');
+      try {
+        console.log('[DB] Creating IVFFlat index on chunks.embedding...');
+        await pool.query(
+          'CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)'
+        );
+        console.log('[DB] IVFFlat index created.');
+      } catch (e: any) {
+        if (e.code === '42P07') {
+          console.log('[DB] IVFFlat index already exists (concurrent creation).');
+        } else {
+          console.error('[DB] Failed to create vector index:', e);
+        }
+      }
     }
   } catch (e) {
     console.error('[DB] Failed to ensure vector index:', e);
