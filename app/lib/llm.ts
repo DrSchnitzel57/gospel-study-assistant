@@ -4,6 +4,7 @@ import OpenAI from 'openai';
 const LLM_BASE_URL = process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 const LLM_MODEL = process.env.LLM_MODEL || 'qwen-3.6-27b';
+const LLM_TIMEOUT = parseInt(process.env.LLM_TIMEOUT || '45000', 10);
 
 // Embedding endpoint (vector embeddings)
 const EMBEDDING_BASE_URL = process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
@@ -37,7 +38,7 @@ export async function getEmbedding(text: string): Promise<number[]> {
     model: EMBEDDING_MODEL,
     input: text,
   }, {
-    timeout: 60000,
+    timeout: 30000,
   });
   const elapsed = Date.now() - t0;
 
@@ -64,11 +65,30 @@ export async function callLLM(messages: Array<{ role: string; content: string }>
     temperature: 0.1,
     max_tokens: 4096,
   }, {
-    timeout: 120000,
+    timeout: LLM_TIMEOUT,
   });
 
   if (!response.choices || response.choices.length === 0) {
     throw new Error('LLM API returned empty choices array');
   }
   return response.choices[0].message.content || '';
+}
+
+export async function* callLLMStream(
+  messages: Array<{ role: string; content: string }>
+): AsyncGenerator<string> {
+  const stream = await llmClient.chat.completions.create({
+    model: LLM_MODEL,
+    messages: messages as any,
+    temperature: 0.1,
+    max_tokens: 4096,
+    stream: true,
+  }, {
+    timeout: LLM_TIMEOUT,
+  });
+
+  for await (const chunk of stream) {
+    const content = chunk.choices[0]?.delta?.content;
+    if (content) yield content;
+  }
 }

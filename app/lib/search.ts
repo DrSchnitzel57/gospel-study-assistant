@@ -2,6 +2,39 @@ import pool from '@/lib/db';
 import { getEmbedding, callLLM, getConfig } from '@/lib/llm';
 import { extractJSONFromLLMOutput, validateLLMResponse, type Quote } from '@/lib/validation';
 
+const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.25');
+const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '3', 10);
+const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '20', 10);
+
+const GREETING_PATTERNS = [
+  /^hello\b/i, /^hi\b/i, /^hey\b/i, /^good\s+(morning|afternoon|evening)/i,
+  /^howdy/i, /^greetings/i, /^what'?s\s+up/i, /^sup\b/i,
+];
+
+const GOSPEL_KEYWORDS = [
+  'jesus', 'christ', 'god', 'scripture', 'bible', 'mormon', 'lds', 'church',
+  'faith', 'prayer', 'salvation', 'repentance', 'baptism', 'covenant', 'temple',
+  'revelation', 'prophet', 'apostle', 'atonement', 'resurrection', 'gospel',
+  'doctrine', 'commandment', 'testimony', 'spirit', 'holy', 'baptism',
+  'restoration', 'mormon', 'book of mormon', 'd&c', 'doctrine and covenants',
+  'temple', 'ordinance', 'sealing', 'eternal', 'family', 'plan of salvation',
+  'pre-mortal', 'kingdom', 'zion', 'covenant path', 'living worthily',
+  'scrupulosity', 'ocd', 'anxiety', 'doubt', 'temptation', 'sin', 'forgiveness',
+  'mercy', 'grace', 'charity', 'hope', 'patience', 'humility', 'obedience',
+  'trust', 'worship', 'sacrifice', 'offering', 'fasting', 'tithing',
+  'missionary', 'mission', 'calling', 'stewardship', 'service', 'charity',
+  'neighbor', 'poor', 'widow', 'orphan', 'stranger', 'latter-day',
+];
+
+export function isGreetingOrOffTopic(query: string): boolean {
+  if (GREETING_PATTERNS.some(p => p.test(query))) return true;
+  const words = query.toLowerCase().split(/\s+/);
+  if (words.length <= 2) {
+    return !GOSPEL_KEYWORDS.some(kw => query.toLowerCase().includes(kw));
+  }
+  return false;
+}
+
 export const SYSTEM_PROMPT = `You are a scripture and Church resource retrieval assistant for members of The Church of Jesus Christ of Latter-day Saints.
 
 CRITICAL RULES - VIOLATING THESE IS UNACCEPTABLE:
@@ -134,12 +167,12 @@ export async function searchChunks(
     JOIN documents d ON c.document_id = d.id
     ${whereStr}
     ORDER BY c.embedding <=> $${paramIndex}::vector
-    LIMIT 30
+    LIMIT 50
   `;
 
   const result = await pool.query(sql, params);
 
-  return result.rows.map(row => ({
+  const allChunks = result.rows.map(row => ({
     id: row.id,
     text: row.text,
     document_title: row.document_title,
@@ -150,6 +183,19 @@ export async function searchChunks(
     content_category: row.content_category,
     similarity: parseFloat(row.similarity),
   }));
+
+  // Filter by minimum similarity threshold
+  const relevantChunks = allChunks.filter(c => c.similarity >= MIN_SIMILARITY);
+
+  // Log similarity distribution for debugging
+  if (allChunks.length > 0) {
+    const topSim = allChunks[0].similarity.toFixed(4);
+    const aboveThreshold = relevantChunks.length;
+    console.log(`[Search] Similarity: top=${topSim}, above_threshold(${MIN_SIMILARITY})=${aboveThreshold}/${allChunks.length}`);
+  }
+
+  // Return only top N relevant chunks
+  return relevantChunks.slice(0, MAX_CHUNKS);
 }
 
 export function validateQuotesAgainstChunks(
@@ -158,18 +204,28 @@ export function validateQuotesAgainstChunks(
 ): Quote[] {
   return quotes.filter(quote => {
     const normalizedQuote = quote.quote.toLowerCase().trim();
-    if (normalizedQuote.length < 15) return true;
+
+    // Very short quotes (< 10 chars) are always accepted
+    if (normalizedQuote.length < 10) return true;
 
     return chunks.some(chunk => {
       const normalizedChunk = chunk.text.toLowerCase().trim();
-      // Try exact substring match first (longest prefix, up to 60 chars)
-      for (let len = Math.min(normalizedQuote.length, 60); len >= 20; len -= 5) {
-        const substring = normalizedQuote.slice(0, len);
-        if (normalizedChunk.includes(substring)) return true;
+
+      // Try sliding window substring match (more robust than prefix-only)
+      for (let len = Math.min(normalizedQuote.length, 80); len >= 12; len -= 3) {
+        for (let start = 0; start <= normalizedQuote.length - len; start += 3) {
+          const substring = normalizedQuote.slice(start, start + len);
+          if (normalizedChunk.includes(substring)) return true;
+        }
       }
-      // Fallback: check first 4 words
-      const quoteWords = normalizedQuote.split(/\s+/).slice(0, 4).join(' ');
-      if (quoteWords.length > 10 && normalizedChunk.includes(quoteWords)) return true;
+
+      // Fallback: check word overlap (3+ consecutive words)
+      const quoteWords = normalizedQuote.split(/\s+/);
+      for (let i = 0; i <= quoteWords.length - 3; i++) {
+        const phrase = quoteWords.slice(i, i + 3).join(' ');
+        if (phrase.length > 8 && normalizedChunk.includes(phrase)) return true;
+      }
+
       return false;
     });
   });
@@ -184,15 +240,24 @@ export async function search(query: string, filters: {
 } = {}) {
   const t0 = Date.now();
 
-  console.log(`[Search] Query: "${query.slice(0, 80)}"...`);
-  const chunks = await searchChunks(query, filters);
-  console.log(`[Search] Found ${chunks.length} chunks in ${Date.now() - t0}ms`);
-  if (chunks.length > 0) {
-    console.log(`[Search] Top similarity: ${chunks[0].similarity.toFixed(4)}`);
+  // Early exit for greetings and off-topic queries
+  if (isGreetingOrOffTopic(query)) {
+    console.log(`[Search] Query appears to be a greeting/off-topic: "${query.slice(0, 80)}"`);
+    return { quotes: [], no_results: true, greeting: true };
   }
 
+  console.log(`[Search] Query: "${query.slice(0, 80)}"...`);
+  const chunks = await searchChunks(query, filters);
+  console.log(`[Search] Found ${chunks.length} relevant chunks in ${Date.now() - t0}ms`);
+
   if (chunks.length === 0) {
-    console.log('[Search] No chunks found, returning no_results');
+    console.log('[Search] No relevant chunks found (below similarity threshold), returning no_results');
+    return { quotes: [], no_results: true };
+  }
+
+  // Don't call LLM if we don't have enough relevant chunks
+  if (chunks.length < MIN_CHUNKS_FOR_LLM) {
+    console.log(`[Search] Only ${chunks.length} relevant chunks (min ${MIN_CHUNKS_FOR_LLM}), returning no_results`);
     return { quotes: [], no_results: true };
   }
 

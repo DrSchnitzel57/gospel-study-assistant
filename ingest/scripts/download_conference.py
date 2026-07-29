@@ -29,7 +29,6 @@ def clean_text(html_content: str) -> str:
 def extract_talk_text(page) -> str:
     """Extract the main transcript text from a conference talk page."""
     try:
-        # Wait for content to load
         page.wait_for_timeout(3000)
 
         # Try to find the main article content
@@ -43,7 +42,6 @@ def extract_talk_text(page) -> str:
         # Fallback: get all text from body, strip nav/footer
         body = page.query_selector('body')
         if body:
-            # Remove navigation, footer, sidebar elements
             for selector in ['nav', 'footer', 'header', 'aside', '.nav', '.footer', '.sidebar']:
                 for el in body.query_selector_all(selector):
                     el.evaluate('el => el.innerHTML = ""')
@@ -71,7 +69,7 @@ def download_conference_talks():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             viewport={'width': 1920, 'height': 1080},
         )
         page = context.new_page()
@@ -83,38 +81,31 @@ def download_conference_talks():
         ]
 
         for conf_slug in conferences:
-            conf_url = f'{CONFERENCE_URL}/{conf_slug}'
+            conf_url = f'{CONFERENCE_URL}/{conf_slug}?lang=eng'
             print(f"\n  Conference {conf_slug}...")
 
             try:
                 page.goto(conf_url, wait_until='domcontentloaded', timeout=60000)
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(5000)
 
-                # Collect all talk links on the page
+                # Collect talk links via query_selector_all (Playwright)
                 talk_links = []
-                links_html = page.content()
-
-                # Parse links from page content
-                link_pattern = re.findall(
-                    r'<a[^>]*href=["\']([^"\']*general-conference[^"\']*talk[^"\']*)["\'][^>]*>',
-                    links_html
-                )
-
-                # Also try to find links via query_selector_all
                 for link_elem in page.query_selector_all('a[href]'):
                     href = link_elem.get_attribute('href') or ''
                     if '/general-conference/' in href and '/talk/' in href:
                         if href.startswith('/'):
                             href = 'https://www.churchofjesuschrist.org' + href
+                        if '?lang=' not in href:
+                            href += '?lang=eng'
                         talk_links.append(href)
 
-                # Deduplicate
                 talk_links = list(dict.fromkeys(talk_links))
                 print(f"    Found {len(talk_links)} talks")
 
                 for i, talk_url in enumerate(talk_links):
                     try:
                         page.goto(talk_url, wait_until='domcontentloaded', timeout=60000)
+                        page.wait_for_timeout(3000)
 
                         # Extract title
                         title = 'Unknown Talk'
@@ -125,8 +116,7 @@ def download_conference_talks():
                         # Extract speaker
                         speaker = 'Unknown'
                         speaker_elem = page.query_selector(
-                            '[class*="speaker"], [class*="author"], [class*="byline"], '
-                            'a[href*="/speakers/"], span[class*="name"]'
+                            'a[href*="/speakers/"], [class*="speaker"]'
                         )
                         if speaker_elem:
                             speaker = speaker_elem.inner_text().strip()
@@ -164,7 +154,7 @@ def download_conference_talks():
                         else:
                             print(f"    [{i+1}/{len(talk_links)}] {title[:40]}... SKIPPED (insufficient text)")
 
-                        time.sleep(1)  # Be polite
+                        time.sleep(1)
 
                     except Exception as e:
                         print(f"    [{i+1}/{len(talk_links)}] ERROR: {e}")

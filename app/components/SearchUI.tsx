@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import QuoteCard from './QuoteCard';
 import SourceToggle from './SourceToggle';
 import type { Quote } from '@/lib/validation';
@@ -19,19 +19,37 @@ export default function SearchUI() {
   const [loading, setLoading] = useState(false);
   const [noResults, setNoResults] = useState(false);
   const [error, setError] = useState('');
+  const [greeting, setGreeting] = useState('');
   const [historyMode, setHistoryMode] = useState(false);
   const [enabledCategories, setEnabledCategories] = useState<string[]>(
     CATEGORIES.filter(c => c.default).map(c => c.id)
   );
+  const [loadingTime, setLoadingTime] = useState(0);
+  const [loadingTimer, setLoadingTimer] = useState<NodeJS.Timeout | null>(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (loadingTimer) clearTimeout(loadingTimer);
+    };
+  }, [loadingTimer]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!query.trim()) return;
 
     setLoading(true);
+    setLoadingTime(0);
     setNoResults(false);
     setError('');
+    setGreeting('');
     setResults([]);
+
+    // Start loading timer for user feedback
+    const timer = setInterval(() => {
+      setLoadingTime(prev => prev + 1);
+    }, 1000);
+    setLoadingTimer(timer);
 
     try {
       const res = await fetch('/api/search', {
@@ -53,16 +71,25 @@ export default function SearchUI() {
         return;
       }
 
+      if (data.greeting) {
+        setGreeting(data.message || 'I can help with gospel questions. Try asking about a scripture, doctrine, or Church topic.');
+        return;
+      }
+
       if (data.no_results || !data.quotes || data.quotes.length === 0) {
         setNoResults(true);
         setResults([]);
       } else {
         setResults(data.quotes);
       }
-    } catch (err: any) {
-      setError(err.message || 'Network error — check your connection');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Network error — check your connection');
     } finally {
       setLoading(false);
+      if (loadingTimer) {
+        clearInterval(loadingTimer);
+        setLoadingTimer(null);
+      }
     }
   }
 
@@ -73,6 +100,14 @@ export default function SearchUI() {
         : [...prev, categoryId]
     );
   }
+
+  // Loading status messages based on elapsed time
+  const getLoadingMessage = () => {
+    if (loadingTime < 3) return 'Searching scriptures and resources...';
+    if (loadingTime < 10) return 'Found relevant passages, extracting quotes...';
+    if (loadingTime < 20) return 'Still working — analyzing results...';
+    return 'Processing — this may take a moment...';
+  };
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
@@ -130,7 +165,16 @@ export default function SearchUI() {
       {loading && (
         <div className="text-center py-12">
           <div className="inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-          <p className="mt-4 text-gray-500">Searching scriptures and resources...</p>
+          <p className="mt-4 text-gray-500">{getLoadingMessage()}</p>
+          {loadingTime >= 10 && (
+            <p className="mt-2 text-xs text-gray-400">{loadingTime}s elapsed</p>
+          )}
+        </div>
+      )}
+
+      {greeting && !loading && (
+        <div className="text-center py-8 bg-blue-50 rounded-lg border border-blue-200">
+          <p className="text-blue-700">{greeting}</p>
         </div>
       )}
 
@@ -140,10 +184,16 @@ export default function SearchUI() {
         </div>
       )}
 
-      {noResults && !loading && !error && (
+      {noResults && !loading && !error && !greeting && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-600 text-lg">No direct quotes found for your query.</p>
-          <p className="text-gray-400 text-sm mt-2">Try rephrasing or check the Status page to verify data is loaded.</p>
+          <p className="text-gray-400 text-sm mt-2">
+            Try rephrasing, or{' '}
+            <a href="/status" className="text-accent hover:underline">
+              check the Status page
+            </a>{' '}
+            to verify data is loaded.
+          </p>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const QuoteSchema = z.object({
-  quote: z.string().min(10),
+  quote: z.string().min(5),
   source: z.string(),
   source_type: z.enum(['primary', 'secondary']),
   official_status: z.enum(['official', 'unofficial']),
@@ -28,11 +28,16 @@ export function validateLLMResponse(raw: string): LLMResponse | null {
 }
 
 export function extractJSONFromLLMOutput(output: string): string {
-  const jsonMatch = output.match(/\{[\s\S]*\}/);
-  if (jsonMatch) return jsonMatch[0];
-
+  // Try code block first (most reliable)
   const codeBlockMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
+
+  // Find the outermost JSON object (greedy match from last } to first {)
+  const lastBrace = output.lastIndexOf('}');
+  const firstBrace = output.indexOf('{');
+  if (lastBrace > firstBrace) {
+    return output.slice(firstBrace, lastBrace + 1);
+  }
 
   return output;
 }
