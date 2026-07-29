@@ -47,7 +47,7 @@ def ensure_schema(cur):
         cur.execute(
             "ALTER TABLE documents ADD CONSTRAINT documents_title_key UNIQUE (title)"
         )
-    embedding_dims = int(os.environ.get('EMBEDDING_DIMENSIONS', '4096'))
+    embedding_dims = int(os.environ.get('EMBEDDING_DIMENSIONS', '1024'))
     cur.execute(
         """SELECT atttypmod FROM pg_attribute
            WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'"""

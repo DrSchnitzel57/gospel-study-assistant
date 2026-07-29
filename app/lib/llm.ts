@@ -9,7 +9,7 @@ const LLM_MODEL = process.env.LLM_MODEL || 'qwen-3.6-27b';
 const EMBEDDING_BASE_URL = process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
 const EMBEDDING_API_KEY = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || '';
 const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'nomic-embed-text';
-const EMBEDDING_DIMENSIONS = parseInt(process.env.EMBEDDING_DIMENSIONS || '4096', 10);
+const EMBEDDING_DIMENSIONS = parseInt(process.env.EMBEDDING_DIMENSIONS || '1024', 10);
 
 const llmClient = new OpenAI({
   baseURL: LLM_BASE_URL,

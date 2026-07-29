@@ -10,7 +10,7 @@ LLM_API_KEY = os.environ.get('LLM_API_KEY', os.environ.get('OPENAI_API_KEY', '')
 EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL', os.environ.get('OPENAI_BASE_URL', 'http://localhost:8000/v1'))
 EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY', os.environ.get('OPENAI_API_KEY', ''))
 EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'nomic-embed-text')
-EMBEDDING_DIMENSIONS = int(os.environ.get('EMBEDDING_DIMENSIONS', '768'))
+EMBEDDING_DIMENSIONS = int(os.environ.get('EMBEDDING_DIMENSIONS', '1024'))
 
 
 def get_embedding(text: str) -> List[float]:

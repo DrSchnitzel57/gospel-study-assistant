@@ -4,7 +4,7 @@ import { registerTypes } from 'pgvector/pg';
 let poolInstance: Pool | null = null;
 let indexEnsured = false;
 
-const EMBEDDING_DIMENSIONS = parseInt(process.env.EMBEDDING_DIMENSIONS || '4096', 10);
+const EMBEDDING_DIMENSIONS = parseInt(process.env.EMBEDDING_DIMENSIONS || '1024', 10);
 
 async function ensureVectorIndex(): Promise<void> {
   if (indexEnsured) return;
