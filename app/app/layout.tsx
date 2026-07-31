@@ -3,6 +3,7 @@ import './globals.css';
 import Providers from '@/components/Providers';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 export const metadata: Metadata = {
   title: 'Gospel Study Assistant',
@@ -15,7 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen flex flex-col bg-gray-50">
         <Providers>
           <Navbar />
-          <main className="flex-1">{children}</main>
+          <ErrorBoundary>
+            <main className="flex-1">{children}</main>
+          </ErrorBoundary>
           <Footer />
         </Providers>
       </body>

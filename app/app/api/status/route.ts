@@ -41,45 +41,44 @@ export async function GET() {
   status.embedding.baseUrl = config.embeddingBaseUrl;
   status.embedding.dimensions = config.embeddingDimensions;
 
-  try {
-    const start = Date.now();
-    const res = await fetch(`${config.llmBaseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || ''}`,
-      },
-      body: JSON.stringify({
-        model: config.llmModel,
-        messages: [{ role: 'user', content: 'ok' }],
-        max_tokens: 1,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    status.llm.connected = res.ok;
-    status.llm.pingTime = Date.now() - start;
-  } catch (err: any) {
-    status.llm.error = err.message;
+  const llmAuth = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+  const embedAuth = process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || '';
+
+  const [llmResult, embedResult] = await Promise.allSettled([
+    (async () => {
+      const start = Date.now();
+      const res = await fetch(`${config.llmBaseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${llmAuth}` },
+        body: JSON.stringify({ model: config.llmModel, messages: [{ role: 'user', content: 'ok' }], max_tokens: 1 }),
+        signal: AbortSignal.timeout(10000),
+      });
+      return { connected: res.ok, pingTime: Date.now() - start };
+    })(),
+    (async () => {
+      const start = Date.now();
+      const res = await fetch(`${config.embeddingBaseUrl}/embeddings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${embedAuth}` },
+        body: JSON.stringify({ model: config.embeddingModel, input: 'test' }),
+        signal: AbortSignal.timeout(10000),
+      });
+      return { connected: res.ok, pingTime: Date.now() - start };
+    })(),
+  ]);
+
+  if (llmResult.status === 'fulfilled') {
+    status.llm.connected = llmResult.value.connected;
+    status.llm.pingTime = llmResult.value.pingTime;
+  } else {
+    status.llm.error = llmResult.reason?.message || 'LLM ping failed';
   }
 
-  try {
-    const start = Date.now();
-    const res = await fetch(`${config.embeddingBaseUrl}/embeddings`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || ''}`,
-      },
-      body: JSON.stringify({
-        model: config.embeddingModel,
-        input: 'test',
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    status.embedding.connected = res.ok;
-    status.embedding.pingTime = Date.now() - start;
-  } catch (err: any) {
-    status.embedding.error = err.message;
+  if (embedResult.status === 'fulfilled') {
+    status.embedding.connected = embedResult.value.connected;
+    status.embedding.pingTime = embedResult.value.pingTime;
+  } else {
+    status.embedding.error = embedResult.reason?.message || 'Embedding ping failed';
   }
 
   return NextResponse.json(status);

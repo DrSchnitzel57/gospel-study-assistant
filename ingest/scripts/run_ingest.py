@@ -6,7 +6,10 @@ Usage:
   python -m scripts.run_ingest scripture # Run scripture ingester only
   python -m scripts.run_ingest supplementary # Run conference/manuals/devotionals
   python -m scripts.run_ingest download_bible # Download Bible text files
-  python -m scripts.run_ingest download_supplementary # Download supplementary text files
+  python -m scripts.run_ingest download_conference # Download conference talks (Playwright)
+  python -m scripts.run_ingest download_cfm # Download CFM manuals (Open Scripture API)
+  python -m scripts.run_ingest download_byu # Download BYU devotionals (WordPress API)
+  python -m scripts.run_ingest download_all # Download everything
 """
 
 import sys
@@ -38,14 +41,24 @@ def run_ingestion(target: str = 'all'):
         return
 
     if target == 'download_conference':
-        from scripts.download_conference import download_conference_talks
+        from scripts.download_conference_playwright import download_conference_talks
         download_conference_talks()
+        return
+
+    if target == 'download_cfm':
+        from scripts.download_cfm import download_cfm_manuals
+        download_cfm_manuals()
+        return
+
+    if target == 'download_byu':
+        from scripts.download_byu_speeches import download_byu_speeches
+        download_byu_speeches()
         return
 
     if target == 'download_all':
         from scripts.download_scriptures import download_all_bible
         from scripts.download_supplementary import download_all
-        from scripts.download_conference import download_conference_talks
+        from scripts.download_conference_playwright import download_conference_talks
         download_all_bible()
         download_conference_talks()
         download_all()

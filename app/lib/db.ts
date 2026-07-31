@@ -14,12 +14,15 @@ async function ensureVectorIndex(): Promise<void> {
       `SELECT atttypmod FROM pg_attribute
        WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'`
     );
-    if (colRes.rows.length > 0 && colRes.rows[0].atttypmod === -1) {
-      console.log(`[DB] Altering embedding column to vector(${EMBEDDING_DIMENSIONS})...`);
-      await pool.query(
-        `ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(${EMBEDDING_DIMENSIONS})`
-      );
-      console.log('[DB] Embedding column altered.');
+    if (colRes.rows.length > 0) {
+      const currentDims = colRes.rows[0].atttypmod;
+      if (currentDims === -1 || currentDims !== EMBEDDING_DIMENSIONS) {
+        console.log(`[DB] Altering embedding column from vector(${currentDims === -1 ? 'any' : currentDims}) to vector(${EMBEDDING_DIMENSIONS})...`);
+        await pool.query(
+          `ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(${EMBEDDING_DIMENSIONS})`
+        );
+        console.log('[DB] Embedding column altered.');
+      }
     }
 
     const res = await pool.query(

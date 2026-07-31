@@ -168,7 +168,7 @@ def download_byu_speeches() -> int:
                 if not href.startswith('http'): href = byu_base + href
                 speech_links.append(href)
                 
-        speech_links = list(dict.fromkeys(speech_links))[:25]
+        speech_links = list(dict.fromkeys(speech_links))
         print(f"  Found {len(speech_links)} speeches")
         
         for i, speech_url in enumerate(speech_links):

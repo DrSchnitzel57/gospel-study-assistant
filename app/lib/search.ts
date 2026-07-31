@@ -3,7 +3,7 @@ import { getEmbedding, callLLM, getConfig } from '@/lib/llm';
 import { extractJSONFromLLMOutput, validateLLMResponse, validateQuotesAgainstChunks, type Quote } from '@/lib/validation';
 
 const MAX_CONTEXT_CHARS = 24000;
-const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.10');
+const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.25');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '1', 10);
 const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '15', 10);
 
@@ -141,8 +141,7 @@ export function buildUserPrompt(
 }
 
 export async function searchChunks(
-  query: string,
-  searchQuery?: string,
+  embeddingQuery: string,
   filters: {
     categories?: string[];
     sourceTypes?: string[];
@@ -161,7 +160,6 @@ export async function searchChunks(
   content_category: string;
   similarity: number;
 }>> {
-  const embeddingQuery = searchQuery || query;
   const embedding = await getEmbedding(embeddingQuery);
   const embeddingStr = `[${embedding.join(',')}]`;
 
@@ -258,11 +256,11 @@ export async function search(query: string, filters: {
 
   console.log(`[Search] Query: "${query.slice(0, 80)}"...`);
   const expandedQuery = expandQuery(query);
-  const chunks = await searchChunks(query, expandedQuery, filters);
+  const chunks = await searchChunks(expandedQuery, filters);
   console.log(`[Search] Found ${chunks.length} relevant chunks in ${Date.now() - t0}ms`);
 
-  if (chunks.length === 0) {
-    console.log('[Search] No relevant chunks found (below similarity threshold), returning no_results');
+  if (chunks.length < MIN_CHUNKS_FOR_LLM) {
+    console.log(`[Search] Only ${chunks.length} relevant chunks found (need ${MIN_CHUNKS_FOR_LLM}), returning no_results`);
     return { quotes: [], no_results: true };
   }
 

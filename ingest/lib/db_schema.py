@@ -25,9 +25,11 @@ def ensure_schema(cur):
         WHERE attrelid = 'chunks'::regclass AND attname = 'embedding'
     """)
     row = cur.fetchone()
-    if row and row[0] == -1:
-        logger.info(f"Altering embedding column to vector({embedding_dims})...")
-        cur.execute(f"ALTER TABLE chunks ALTER COLUMN embedding TYPE vector({embedding_dims})")
+    if row:
+        current_dims = row[0]
+        if current_dims == -1 or current_dims != embedding_dims:
+            logger.info(f"Altering embedding column from vector({current_dims if current_dims != -1 else 'any'}) to vector({embedding_dims})...")
+            cur.execute(f"ALTER TABLE chunks ALTER COLUMN embedding TYPE vector({embedding_dims})")
 
     cur.execute("SELECT 1 FROM pg_indexes WHERE indexname = 'idx_chunks_embedding'")
     if not cur.fetchone():

@@ -1,5 +1,5 @@
-import SearchUI from '@/components/SearchUI';
+import { redirect } from 'next/navigation';
 
 export default function Page() {
-  return <SearchUI />;
+  redirect('/search');
 }

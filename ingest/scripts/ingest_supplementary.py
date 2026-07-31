@@ -6,66 +6,21 @@ Reads text files from ingest/data/ and chunks + embeds them into PostgreSQL.
 import os
 import glob
 import sys
-import psycopg2
-from pgvector.psycopg2 import register_vector
-import tiktoken
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 from llm import get_embeddings
 from db_schema import ensure_schema
-
-DATABASE_URL = os.environ.get('DATABASE_URL')
-if not DATABASE_URL:
-    raise ValueError('DATABASE_URL environment variable is required')
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
-EMBEDDING_BATCH_SIZE = 64
+from db import get_conn, return_conn, chunk_text, insert_chunks_batch, EMBEDDING_BATCH_SIZE
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 
-enc = tiktoken.get_encoding("cl100k_base")
 
-
-def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL)
-    register_vector(conn)
-    return conn
-
-
-def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
-    tokens = enc.encode(text)
-    chunks = []
-    start = 0
-    while start < len(tokens):
-        end = min(start + chunk_size, len(tokens))
-        chunk_tokens = tokens[start:end]
-        chunk_text = enc.decode(chunk_tokens)
-        if chunk_text.strip():
-            chunks.append(chunk_text.strip())
-        start += chunk_size - overlap
-    return chunks
-
-
-def insert_chunks_batch(cur, doc_id, chunks, embeddings, verse_ref):
-    """Insert chunks with their embeddings in a single batch."""
-    for i, (chunk_val, embedding) in enumerate(zip(chunks, embeddings)):
-        embedding_str = '[' + ','.join(map(str, embedding)) + ']'
-        cur.execute(
-            """INSERT INTO chunks (document_id, text, embedding, verse_reference, overlap_index)
-               VALUES (%s, %s, %s::vector, %s, %s)""",
-            (doc_id, chunk_val, embedding_str, verse_ref, i)
-        )
-
-
-def get_or_create_source(slug: str, name: str, conn):
-    cur = conn.cursor()
+def get_or_create_source(cur, slug: str, name: str):
     ensure_schema(cur)
-    conn.commit()
     cur.execute('SELECT id FROM sources WHERE slug = %s', (slug,))
     row = cur.fetchone()
     if row:
-        cur.close()
         return row[0]
 
     cur.execute(
@@ -73,8 +28,6 @@ def get_or_create_source(slug: str, name: str, conn):
         (slug, name, True, name)
     )
     row = cur.fetchone()
-    conn.commit()
-    cur.close()
     return row[0] if row else None
 
 
@@ -91,11 +44,11 @@ def ingest_text_file(
     reference_prefix: str = '',
 ):
     """Ingest a single text file into the database with batch embeddings."""
-    conn = get_db_connection()
+    conn = get_conn()
     cur = conn.cursor()
 
     try:
-        source_id = get_or_create_source(source_slug, title, conn)
+        source_id = get_or_create_source(cur, source_slug, title)
         if not source_id:
             print(f"    Could not find/create source '{source_slug}'")
             return 0
@@ -156,7 +109,7 @@ def ingest_text_file(
         return 0
     finally:
         cur.close()
-        conn.close()
+        return_conn(conn)
 
 
 # ─── Conference Talks ──────────────────────────────────────────────────────────

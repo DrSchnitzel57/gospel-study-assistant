@@ -24,7 +24,16 @@ export default function SearchUI() {
     CATEGORIES.filter(c => c.default).map(c => c.id)
   );
   const [loadingTime, setLoadingTime] = useState(0);
-  const [loadingTimer, setLoadingTimer] = useState<NodeJS.Timeout | null>(null);
+  const [loadingTimer, setLoadingTimer] = useState<ReturnType<typeof setInterval> | null>(null);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('searchHistory');
+    if (saved) {
+      try { setSearchHistory(JSON.parse(saved)); } catch { /* ignore */ }
+    }
+  }, []);
 
   // Cleanup timer on unmount
   useEffect(() => {
@@ -75,6 +84,14 @@ export default function SearchUI() {
       } else {
         setResults(data.quotes);
       }
+
+      // Save to search history
+      const trimmed = query.trim();
+      setSearchHistory(prev => {
+        const updated = [trimmed, ...prev.filter(q => q !== trimmed)].slice(0, 10);
+        localStorage.setItem('searchHistory', JSON.stringify(updated));
+        return updated;
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Network error — check your connection');
     } finally {
@@ -122,6 +139,39 @@ export default function SearchUI() {
           </button>
         </div>
       </form>
+
+      {searchHistory.length > 0 && !loading && results.length === 0 && (
+        <div className="mb-4 relative">
+          <button
+            type="button"
+            onClick={() => setShowHistory(!showHistory)}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            {showHistory ? 'Hide' : 'Show'} recent searches ({searchHistory.length})
+          </button>
+          {showHistory && (
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {searchHistory.map((q, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => { setQuery(q); setShowHistory(false); }}
+                  className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded transition-colors"
+                >
+                  {q.slice(0, 40)}{q.length > 40 ? '…' : ''}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => { setSearchHistory([]); localStorage.removeItem('searchHistory'); setShowHistory(false); }}
+                className="text-xs text-red-400 hover:text-red-600 px-2 py-1 transition-colors"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-3">
