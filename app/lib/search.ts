@@ -7,7 +7,7 @@ const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '3', 10);
 const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '25', 10);
 const MAX_DECOMPOSED_QUERIES = 6;
-const MAX_KEYWORD_FALLBACK_CHUNKS = 10;
+const MAX_KEYWORD_FALLBACK_CHUNKS = 15;
 
 const QUERY_EXPANSIONS: Record<string, string[]> = {
   // Mental health / psychological conditions
@@ -74,7 +74,8 @@ Rewrite the user's question into ${MAX_DECOMPOSED_QUERIES} diverse search querie
 
 - The literal topic words the user used
 - The doctrinal / gospel vocabulary the Church uses for that topic
-- The underlying need, emotion, or situation behind the question (e.g. anxiety, worthiness, grief, doubt) and the principles that address it
+- The underlying need, emotion, or situation behind the question (e.g. anxiety, worthiness, grief, doubt, forgiveness) and the doctrinal principles that address it
+- Relevant scripture figures, stories, or Come Follow Me themes
 
 Return ONLY a JSON array of strings, one per search query. Keep each query short (a few words to a short phrase). Example:
 User: "I feel anxious about whether I'm good enough for God"
@@ -93,12 +94,12 @@ export async function decomposeQuery(query: string): Promise<string[]> {
       .filter((q: string) => q.length > 0)
       .slice(0, MAX_DECOMPOSED_QUERIES);
 
-    if (queries.length === 0) {
-      throw new Error('Decomposition produced no queries');
-    }
+    const expanded = expandQuery(query);
+    const expandedQueries = expanded !== query ? [expanded] : [];
+    const allQueries = [...new Set([query, ...queries, ...expandedQueries])].slice(0, MAX_DECOMPOSED_QUERIES);
 
-    console.log(`[Search] Decomposed "${query}" into ${queries.length} queries: ${JSON.stringify(queries)}`);
-    return [...new Set([query, ...queries])].slice(0, MAX_DECOMPOSED_QUERIES);
+    console.log(`[Search] Decomposed "${query}" into ${allQueries.length} queries: ${JSON.stringify(allQueries)}`);
+    return allQueries;
   } catch (e) {
     console.log(`[Search] Query decomposition failed (${e instanceof Error ? e.message : 'unknown'}), falling back to dictionary expansion`);
     const expanded = expandQuery(query);
@@ -111,16 +112,16 @@ export const SYSTEM_PROMPT = `You are a scripture and Church resource retrieval 
 YOUR TASK: Extract relevant direct quotes from the provided context chunks that help address the user's question.
 
 GUIDELINES:
-- Understand the user's underlying need, emotion, or situation, not just their literal words
-- A passage is relevant if it addresses the principle, doctrine, or situation behind the question — even if it does not use the same words as the user
-- Be generous: include every chunk that could meaningfully help the person, even if the connection is topical rather than word-for-word
-- Extract the key verbatim passage from each relevant chunk (at least a sentence or two)
-- Include the source attribution for each quote
-- Aim to return as many relevant quotes as possible (up to 20)
-- Do NOT fabricate or paraphrase quotes — only quote text that appears verbatim in the provided chunks
-- If no relevant content exists, set "no_results" to true
+- Understand the user's underlying need, emotion, or situation, not just their literal words.
+- Use deep reasoning: a passage is relevant if it addresses the principle, doctrine, or pastoral counsel behind the question — even if it does not use the same words as the user.
+- Be generous and broad: include every chunk that could meaningfully help the person, even if the connection is topical or pastoral rather than word-for-word.
+- Extract the key verbatim passage from each relevant chunk (at least a sentence or two).
+- Include the source attribution for each quote.
+- Aim to return as many relevant quotes as possible (up to 25).
+- Do NOT fabricate or paraphrase quotes — only quote text that appears verbatim in the provided chunks.
+- If no relevant content exists, set "no_results" to true.
 
-OUTPUT FORMAT - Return ONLY this JSON structure:
+OUTPUT FORMAT - Return ONLY this JSON structure without any additional text, markdown formatting outside the JSON, or commentary:
 {
   "quotes": [
     {
@@ -323,15 +324,17 @@ async function keywordSearch(
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
       .filter((w) => w.length > 2)
-      .slice(0, 6);
+      .slice(0, 8);
 
     if (words.length === 0) return [];
 
-    const tsquery = words.join(' & ');
+    const tsqueryOr = words.join(' | ');
 
-    let whereClauses: string[] = [`to_tsvector('english', c.text) @@ to_tsquery('english', $1)`];
-    let params: any[] = [tsquery];
-    let paramIndex = 2;
+    let whereClauses: string[] = [
+      `(to_tsvector('english', c.text) @@ websearch_to_tsquery('english', $1) OR to_tsvector('english', c.text) @@ to_tsquery('english', $2))`
+    ];
+    let params: any[] = [query, tsqueryOr];
+    let paramIndex = 3;
 
     if (filters.categories && filters.categories.length > 0) {
       const placeholders = filters.categories.map(() => `$${paramIndex++}`).join(', ');
@@ -360,7 +363,7 @@ async function keywordSearch(
         d.official_status,
         d.doctrinal_weight,
         d.content_category,
-        ts_rank_cd(to_tsvector('english', c.text), to_tsquery('english', $1)) as rank
+        ts_rank_cd(to_tsvector('english', c.text), to_tsquery('english', $2)) as rank
       FROM chunks c
       JOIN documents d ON c.document_id = d.id
       WHERE ${whereClauses.join(' AND ')}
@@ -378,7 +381,7 @@ async function keywordSearch(
       official_status: row.official_status,
       doctrinal_weight: row.doctrinal_weight,
       content_category: row.content_category,
-      similarity: Math.min(0.99, parseFloat(row.rank || '0') + 0.5),
+      similarity: Math.min(0.99, parseFloat(row.rank || '0') + 0.35),
     }));
 
     console.log(`[Search] Keyword fallback found ${chunks.length} chunks`);
@@ -403,8 +406,8 @@ export async function search(query: string, filters: {
   const chunks = await searchChunks(queries, filters);
   console.log(`[Search] Found ${chunks.length} relevant chunks in ${Date.now() - t0}ms`);
 
-  if (chunks.length < MIN_CHUNKS_FOR_LLM) {
-    console.log(`[Search] Only ${chunks.length} relevant chunks found (need ${MIN_CHUNKS_FOR_LLM}), returning no_results`);
+  if (chunks.length === 0) {
+    console.log(`[Search] No relevant chunks found, returning no_results`);
     return { quotes: [], no_results: true };
   }
 

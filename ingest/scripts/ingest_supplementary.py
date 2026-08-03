@@ -74,6 +74,10 @@ def ingest_text_file(
 
         doc_id = doc_row[0]
 
+        cur.execute('SELECT 1 FROM chunks WHERE document_id = %s LIMIT 1', (doc_id,))
+        if cur.fetchone():
+            return 0
+
         # Read and chunk text
         with open(filepath, 'r', encoding='utf-8') as f:
             text = f.read()

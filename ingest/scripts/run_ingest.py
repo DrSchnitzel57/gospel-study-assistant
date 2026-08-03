@@ -25,6 +25,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def download_conference_safe():
+    try:
+        from scripts.download_conference_playwright import download_conference_talks
+        logger.info("Attempting conference download via Playwright...")
+        download_conference_talks()
+    except Exception as e:
+        logger.warning(f"Playwright conference download failed ({e}), falling back to Requests/BS4 downloader...")
+        from scripts.download_conference import download_conference_talks
+        download_conference_talks()
+
+
+def download_cfm_safe():
+    try:
+        from scripts.download_cfm import download_cfm_manuals
+        logger.info("Downloading Come, Follow Me manuals via Open Scripture API...")
+        download_cfm_manuals()
+    except Exception as e:
+        logger.warning(f"API CFM download failed ({e}), falling back to scraper...")
+        from scripts.download_supplementary import download_cfm_manuals
+        download_cfm_manuals()
+
+
+def download_byu_safe():
+    try:
+        from scripts.download_byu_speeches import download_byu_speeches
+        logger.info("Downloading BYU Speeches via WordPress REST API...")
+        download_byu_speeches()
+    except Exception as e:
+        logger.warning(f"API BYU Speeches download failed ({e}), falling back to scraper...")
+        from scripts.download_supplementary import download_byu_speeches
+        download_byu_speeches()
+
+
+def download_supplementary_safe():
+    from scripts.download_supplementary import download_gospel_topics
+    download_cfm_safe()
+    download_byu_safe()
+    download_gospel_topics()
+
+
 def run_ingestion(target: str = 'all'):
     """Run ingestion pipelines."""
     start = time.time()
@@ -36,32 +76,26 @@ def run_ingestion(target: str = 'all'):
         return
 
     if target == 'download_supplementary':
-        from scripts.download_supplementary import download_all
-        download_all()
+        download_supplementary_safe()
         return
 
     if target == 'download_conference':
-        from scripts.download_conference_playwright import download_conference_talks
-        download_conference_talks()
+        download_conference_safe()
         return
 
     if target == 'download_cfm':
-        from scripts.download_cfm import download_cfm_manuals
-        download_cfm_manuals()
+        download_cfm_safe()
         return
 
     if target == 'download_byu':
-        from scripts.download_byu_speeches import download_byu_speeches
-        download_byu_speeches()
+        download_byu_safe()
         return
 
     if target == 'download_all':
         from scripts.download_scriptures import download_all_bible
-        from scripts.download_supplementary import download_all
-        from scripts.download_conference_playwright import download_conference_talks
         download_all_bible()
-        download_conference_talks()
-        download_all()
+        download_conference_safe()
+        download_supplementary_safe()
         return
 
     # Ingestion commands
@@ -87,7 +121,7 @@ def run_ingestion(target: str = 'all'):
         except Exception as e:
             logger.error(f"Supplementary ingestion failed: {e}")
 
-    if target in ('all', 'conference'):
+    if target == 'conference':
         try:
             from scripts.ingest_supplementary import ingest_conference_talks
             logger.info("Starting conference ingestion...")

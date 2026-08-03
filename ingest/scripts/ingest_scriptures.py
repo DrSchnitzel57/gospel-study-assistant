@@ -124,6 +124,10 @@ def ingest_scripture_from_text(scripture_key: str, book_name: str, text: str):
 
         doc_id = doc_row[0]
 
+        cur.execute('SELECT 1 FROM chunks WHERE document_id = %s LIMIT 1', (doc_id,))
+        if cur.fetchone():
+            return 0
+
         # Chunk text
         chunks = chunk_text(text)
         verse_ref = book_name
