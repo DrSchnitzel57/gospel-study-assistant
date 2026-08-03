@@ -42,6 +42,13 @@ export function extractJSONFromLLMOutput(output: string): string {
   return output;
 }
 
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'that', 'this', 'with', 'you', 'your', 'have', 'will', 'shall',
+  'they', 'them', 'their', 'which', 'were', 'was', 'his', 'her', 'him', 'from', 'but',
+  'not', 'are', 'all', 'one', 'our', 'who', 'what', 'when', 'then', 'there', 'into',
+  'upon', 'because', 'unto', 'even', 'these', 'those', 'said', 'lord', 'god',
+]);
+
 export function validateQuotesAgainstChunks(
   quotes: Quote[],
   chunks: Array<{ text: string }>
@@ -51,7 +58,7 @@ export function validateQuotesAgainstChunks(
       .toLowerCase()
       .replace(/[^\w\s]/g, ' ')
       .split(/\s+/)
-      .filter((w) => w.length > 2);
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 
     if (cleanQuoteWords.length < 3) return true;
 
@@ -70,7 +77,7 @@ export function validateQuotesAgainstChunks(
       }
 
       const matchRatio = matchCount / cleanQuoteWords.length;
-      return matchRatio >= 0.8;
+      return matchRatio >= 0.7;
     });
   });
 }

@@ -65,7 +65,7 @@ export default function SearchUI() {
         body: JSON.stringify({
           query: query.trim(),
           filters: {
-            categories: historyMode ? ['history'] : enabledCategories,
+            ...(!historyMode && { categories: enabledCategories }),
             historyMode,
           },
         }),

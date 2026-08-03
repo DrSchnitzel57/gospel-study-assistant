@@ -22,6 +22,16 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
+// Periodically prune stale entries so the in-memory map doesn't grow unboundedly.
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, record] of ipRequestCounts) {
+    if (now - record.windowStart > RATE_LIMIT_WINDOW_MS) {
+      ipRequestCounts.delete(ip);
+    }
+  }
+}, RATE_LIMIT_WINDOW_MS);
+
 export async function POST(req: Request) {
   try {
     const ip = req.headers.get('x-forwarded-for') || 'default-client';

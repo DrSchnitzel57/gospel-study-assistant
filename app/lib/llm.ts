@@ -58,6 +58,35 @@ export async function getEmbedding(text: string): Promise<number[]> {
   return embedding;
 }
 
+export async function getEmbeddings(texts: string[]): Promise<number[][]> {
+  const t0 = Date.now();
+  const response = await embeddingClient.embeddings.create({
+    model: EMBEDDING_MODEL,
+    input: texts,
+  }, {
+    timeout: 30000,
+  });
+  const elapsed = Date.now() - t0;
+
+  if (!response.data || response.data.length === 0) {
+    throw new Error('Embedding API returned empty data array');
+  }
+
+  const embeddings = response.data.map((item) => item.embedding);
+  console.log(`[Embedding] batch=${embeddings.length}, dims=${embeddings[0].length}, model=${EMBEDDING_MODEL}, time=${elapsed}ms`);
+
+  for (const embedding of embeddings) {
+    if (EMBEDDING_DIMENSIONS && embedding.length !== EMBEDDING_DIMENSIONS) {
+      throw new Error(
+        `Embedding has ${embedding.length} dimensions, expected ${EMBEDDING_DIMENSIONS}. ` +
+        `Check EMBEDDING_DIMENSIONS in .env matches your model output.`
+      );
+    }
+  }
+
+  return embeddings;
+}
+
 export async function callLLM(messages: Array<{ role: string; content: string }>): Promise<string> {
   const response = await llmClient.chat.completions.create({
     model: LLM_MODEL,
