@@ -1,6 +1,9 @@
 """
 Downloads General Conference talks from churchofjesuschrist.org using Requests and BS4.
 Bypasses the Playwright URL structure issues and Akamai bot blocking.
+
+Pass a list of years to limit the download, e.g.
+download_conference_talks(years=[2018, 2019, 2020]).
 """
 import os
 import re
@@ -8,6 +11,7 @@ import json
 import time
 import requests
 from bs4 import BeautifulSoup
+from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent / 'data' / 'conference'
@@ -34,10 +38,45 @@ def extract_talk_text(html: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-def download_conference_talks():
+def generate_conferences(start_year=2000, end_year=None):
+    """Generate conference slugs (year/month) from start_year to end_year.
+
+    Past years include both April (04) and October (10) sessions. The current
+    year only includes sessions that have already concluded.
+    """
+    if end_year is None:
+        end_year = datetime.now().year
+    now = datetime.now()
+
+    conferences = []
+    for year in range(start_year, end_year + 1):
+        if year == now.year and year == end_year:
+            if now.month >= 4:
+                conferences.append(f'{year}/04')
+            if now.month >= 10:
+                conferences.append(f'{year}/10')
+        else:
+            conferences.append(f'{year}/04')
+            conferences.append(f'{year}/10')
+    return conferences
+
+
+def resolve_conferences(years=None):
+    """Return the list of conference slugs for the requested years."""
+    if years:
+        slugs = []
+        for year in sorted(set(years)):
+            slugs.extend(generate_conferences(year, year))
+        return slugs
+    return generate_conferences()
+
+
+def download_conference_talks(years=None):
     ensure_dir()
     print("\n" + "=" * 60)
     print("  Downloading General Conference Talks (Requests/BS4 Pivot)")
+    if years:
+        print(f"  Years: {sorted(set(years))}")
     print("=" * 60)
     
     all_talks = []
@@ -45,10 +84,7 @@ def download_conference_talks():
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    conferences = [
-        '2024/04', '2024/10', '2023/04', '2023/10', '2022/04', '2022/10',
-        '2021/04', '2021/10', '2020/04', '2020/10'
-    ]
+    conferences = resolve_conferences(years)
 
     for conf_slug in conferences:
         conf_url = f'{CONFERENCE_URL}/{conf_slug}?lang=eng'

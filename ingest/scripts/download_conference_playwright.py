@@ -1,13 +1,17 @@
 """
 Downloads General Conference talks from churchofjesuschrist.org using Playwright.
 Handles JavaScript-rendered content and exponential backoff/retry logic.
-Covers conferences from 2000/04 to 2026/04 (forward chronologically).
+
+By default covers conferences from 2000/04 to the current year (forward
+chronologically). Pass a list of years to limit the download, e.g.
+download_conference_talks(years=[2018, 2019, 2020]).
 """
 import os
 import re
 import json
 import time
 import logging
+from datetime import datetime
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PwTimeoutError
 
@@ -30,17 +34,37 @@ def ensure_dir():
     BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def generate_conferences():
-    """Generate conference slugs from 2000/04 to 2026/04 (forward chronologically)."""
+def generate_conferences(start_year=2000, end_year=None):
+    """Generate conference slugs (year/session) from start_year to end_year.
+
+    Past years include both April (04) and October (10) sessions. The current
+    year only includes sessions that have already occurred.
+    """
+    if end_year is None:
+        end_year = datetime.now().year
+    now = datetime.now()
+
     conferences = []
-    for year in range(2000, 2027):
-        if year < 2026:
+    for year in range(start_year, end_year + 1):
+        if year == now.year and year == end_year:
+            if now.month >= 4:
+                conferences.append(f'{year}/04')
+            if now.month >= 10:
+                conferences.append(f'{year}/10')
+        else:
             conferences.append(f'{year}/04')
             conferences.append(f'{year}/10')
-        else:
-            # 2026 only has April conference so far
-            conferences.append(f'{year}/04')
     return conferences
+
+
+def resolve_conferences(years=None):
+    """Return the list of conference slugs for the requested years."""
+    if years:
+        slugs = []
+        for year in sorted(set(years)):
+            slugs.extend(generate_conferences(year, year))
+        return slugs
+    return generate_conferences()
 
 
 def retry_with_backoff(func, *args, **kwargs):
@@ -115,15 +139,17 @@ def get_talk_speaker(page):
     return 'Unknown'
 
 
-def download_conference_talks():
+def download_conference_talks(years=None):
     ensure_dir()
     logger.info("=" * 60)
     logger.info("  Downloading General Conference Talks (Playwright)")
+    if years:
+        logger.info(f"  Years: {sorted(set(years))}")
     logger.info("=" * 60)
     
     all_talks = []
     talk_files_saved = 0
-    conferences = generate_conferences()
+    conferences = resolve_conferences(years)
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)

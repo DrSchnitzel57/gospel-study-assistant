@@ -27,19 +27,53 @@ export function validateLLMResponse(raw: string): LLMResponse | null {
   }
 }
 
+/**
+ * Strip reasoning/thinking blocks that reasoning models may emit inline
+ * (defense in depth — llama.cpp normally removes them when the turn completes,
+ * but a truncated response can leave partial markers in the content).
+ */
+export function stripReasoningFromLLMOutput(output: string): string {
+  let text = output;
+  const markers: Array<{ start: string; end: string }> = [
+    { start: "|thinking|", end: "|response|" },
+    { start: "<thinking>", end: "</thinking>" },
+    { start: "<|thinking|>", end: "<|response|>" },
+    { start: "|think|>", end: "|" },
+  ];
+
+  for (const { start, end } of markers) {
+    const startIdx = text.toLowerCase().indexOf(start.toLowerCase());
+    if (startIdx === -1) continue;
+    const endIdx = text.toLowerCase().indexOf(end.toLowerCase(), startIdx + start.length);
+    if (endIdx === -1) continue;
+    text = text.slice(0, startIdx).trimEnd() + '\n' + text.slice(endIdx + end.length).trimStart();
+    return text;
+  }
+
+  // Fallback: Qwen3-style "reasoning_content" section introduced by a marker line.
+  const sectionMatch = text.match(/\n\s*(thinking|reasoning)\s*([\s\S]*?)\n\s*(answer|response)\s*\n/i);
+  if (sectionMatch && sectionMatch.index !== undefined) {
+    return text.slice(0, sectionMatch.index).trim() + '\n' + text.slice(sectionMatch.index + sectionMatch[0].length).trimStart();
+  }
+
+  return text;
+}
+
 export function extractJSONFromLLMOutput(output: string): string {
+  // Drop reasoning content if a model emitted it inline (defense in depth).
+  const cleanOutput = stripReasoningFromLLMOutput(output);
   // Try code block first (most reliable)
-  const codeBlockMatch = output.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const codeBlockMatch = cleanOutput.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (codeBlockMatch) return codeBlockMatch[1].trim();
 
   // Find the outermost JSON object (greedy match from last } to first {)
-  const lastBrace = output.lastIndexOf('}');
-  const firstBrace = output.indexOf('{');
+  const lastBrace = cleanOutput.lastIndexOf('}');
+  const firstBrace = cleanOutput.indexOf('{');
   if (lastBrace > firstBrace) {
-    return output.slice(firstBrace, lastBrace + 1);
+    return cleanOutput.slice(firstBrace, lastBrace + 1);
   }
 
-  return output;
+  return cleanOutput;
 }
 
 const STOPWORDS = new Set([

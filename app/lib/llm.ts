@@ -5,6 +5,24 @@ const LLM_BASE_URL = process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 
 const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
 const LLM_MODEL = process.env.LLM_MODEL || 'qwen-3.6-27b';
 const LLM_TIMEOUT = parseInt(process.env.LLM_TIMEOUT || '120000', 10);
+// Reasoning models (e.g. Qwen3.x) emit thinking/response blocks before the answer.
+// Thinking can improve extraction quality but also blows the output budget and
+// truncates the JSON. Default: keep thinking ON and give it a large budget;
+// set LLM_ENABLE_THINKING=false to disable at the source.
+const LLM_ENABLE_THINKING = envBool('LLM_ENABLE_THINKING', true);
+// Max output tokens for a single completion.
+const LLM_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS || '8192', 10);
+
+function envBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
+}
+
+export type LLMCallOptions = {
+  enableThinking?: boolean;
+  maxTokens?: number;
+};
 
 // Embedding endpoint (vector embeddings)
 const EMBEDDING_BASE_URL = process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
@@ -87,33 +105,48 @@ export async function getEmbeddings(texts: string[]): Promise<number[][]> {
   return embeddings;
 }
 
-export async function callLLM(messages: Array<{ role: string; content: string }>): Promise<string> {
+export async function callLLM(
+  messages: Array<{ role: string; content: string }>,
+  opts: LLMCallOptions = {}
+): Promise<string> {
+  const enableThinking = opts.enableThinking ?? LLM_ENABLE_THINKING;
+  const maxTokens = opts.maxTokens ?? LLM_MAX_TOKENS;
+
   const response = await llmClient.chat.completions.create({
     model: LLM_MODEL,
     messages: messages as any,
     temperature: 0.1,
-    max_tokens: 4096,
+    max_tokens: maxTokens,
   }, {
     timeout: LLM_TIMEOUT,
+    // Extra body param for llama.cpp Qwen3 template; not part of the SDK's
+    // ChatCompletion params type, so passed via RequestOptions.
+    body: { chat_template_kwargs: { enable_thinking: enableThinking } },
   });
 
   if (!response.choices || response.choices.length === 0) {
     throw new Error('LLM API returned empty choices array');
   }
+  console.log(`[LLM] think=${enableThinking} max_tokens=${maxTokens} model=${LLM_MODEL}`);
   return response.choices[0].message.content || '';
 }
 
 export async function* callLLMStream(
-  messages: Array<{ role: string; content: string }>
+  messages: Array<{ role: string; content: string }>,
+  opts: LLMCallOptions = {}
 ): AsyncGenerator<string> {
+  const enableThinking = opts.enableThinking ?? LLM_ENABLE_THINKING;
+  const maxTokens = opts.maxTokens ?? LLM_MAX_TOKENS;
+
   const stream = await llmClient.chat.completions.create({
     model: LLM_MODEL,
     messages: messages as any,
     temperature: 0.1,
-    max_tokens: 4096,
+    max_tokens: maxTokens,
     stream: true,
   }, {
     timeout: LLM_TIMEOUT,
+    body: { chat_template_kwargs: { enable_thinking: enableThinking } },
   });
 
   for await (const chunk of stream) {

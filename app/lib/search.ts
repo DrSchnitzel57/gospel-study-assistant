@@ -1,6 +1,6 @@
 import pool from '@/lib/db';
 import { getEmbeddings, callLLM } from '@/lib/llm';
-import { extractJSONFromLLMOutput, validateLLMResponse, validateQuotesAgainstChunks, type Quote } from '@/lib/validation';
+import { extractJSONFromLLMOutput, validateLLMResponse, validateQuotesAgainstChunks, type LLMResponse } from '@/lib/validation';
 
 const MAX_CONTEXT_CHARS = 24000;
 const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
@@ -437,22 +437,81 @@ export async function search(query: string, filters: {
   }));
 
   const userPrompt = buildUserPrompt(query, contextChunks);
-  const t1 = Date.now();
-  const rawOutput = await callLLM([
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: userPrompt },
-  ]);
-  console.log(`[Search] LLM responded in ${Date.now() - t1}ms`);
-  console.log(`[Search] Raw LLM output (first 200 chars): ${rawOutput.slice(0, 200)}`);
+  const quoted = await extractQuotes(query, userPrompt, chunks);
 
-  const jsonStr = extractJSONFromLLMOutput(rawOutput);
-  const parsed = validateLLMResponse(jsonStr);
-
-  if (!parsed) {
+  if (!quoted) {
     console.log('[Search] LLM response failed validation, returning no_results');
     return { quotes: [], no_results: true };
   }
 
+  console.log(`[Search] Total time: ${Date.now() - t0}ms, returning ${quoted.quotes.length} quotes`);
+  return quoted;
+}
+
+const FALLBACK_INSTRUCTION = `\n\nIMPORTANT: Do NOT use any reasoning, thinking, or commentary. Begin your reply immediately with the JSON object. No markdown fences.`;
+
+/**
+ * Calls the LLM to extract quotes from context. Reasons by default, but if the
+ * reasoning-enabled response fails JSON validation (e.g. it was truncated at the
+ * output budget), retries once with thinking disabled for a clean, fast pass.
+ */
+async function extractQuotes(
+  query: string,
+  userPrompt: string,
+  chunks: ChunkRow[]
+): Promise<LLMResponse | null> {
+  let t1 = Date.now();
+  let rawOutput: string;
+  try {
+    rawOutput = await callLLM([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ]);
+  } catch (e) {
+    console.log(`[Search] LLM extraction call failed: ${e instanceof Error ? e.message : 'unknown'}`);
+    return null;
+  }
+  console.log(`[Search] LLM responded in ${Date.now() - t1}ms`);
+  console.log(`[Search] Raw LLM output (first 200 chars): ${rawOutput.slice(0, 200)}`);
+
+  const parsed = tryParseQuotes(rawOutput);
+  if (parsed) {
+    return validateQuotes(parsed, chunks);
+  }
+
+  console.log(`[Search] Extraction output failed validation (len=${rawOutput.length}, tail: ${rawOutput.slice(-300)})`);
+  console.log('[Search] Retrying extraction with thinking disabled...');
+
+  try {
+    t1 = Date.now();
+    rawOutput = await callLLM(
+      [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt + FALLBACK_INSTRUCTION },
+      ],
+      { enableThinking: false }
+    );
+    console.log(`[Search] Fallback LLM responded in ${Date.now() - t1}ms`);
+    console.log(`[Search] Fallback raw output (first 200 chars): ${rawOutput.slice(0, 200)}`);
+  } catch (e) {
+    console.log(`[Search] Fallback LLM call failed: ${e instanceof Error ? e.message : 'unknown'}`);
+    return null;
+  }
+
+  const fallbackParsed = tryParseQuotes(rawOutput);
+  if (!fallbackParsed) {
+    console.log(`[Search] Fallback output also failed validation (len=${rawOutput.length})`);
+    return null;
+  }
+  return validateQuotes(fallbackParsed, chunks);
+}
+
+function tryParseQuotes(rawOutput: string): LLMResponse | null {
+  const jsonStr = extractJSONFromLLMOutput(rawOutput);
+  return validateLLMResponse(jsonStr);
+}
+
+function validateQuotes(parsed: LLMResponse, chunks: ChunkRow[]): LLMResponse {
   const beforeCount = parsed.quotes.length;
   parsed.quotes = validateQuotesAgainstChunks(parsed.quotes, chunks);
   const afterCount = parsed.quotes.length;
@@ -462,7 +521,5 @@ export async function search(query: string, filters: {
       `[Search] Hallucination guard: Filtered ${beforeCount - afterCount} unverified quote(s)`
     );
   }
-
-  console.log(`[Search] Total time: ${Date.now() - t0}ms, returning ${parsed.quotes.length} quotes`);
   return parsed;
 }

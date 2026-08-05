@@ -21,12 +21,14 @@ From `app/`:
 Ingest (from repo root, needs `db` up and `.env`):
 - `docker compose run --rm ingest python -m scripts.run_ingest <command>`
 - Commands: `download_bible`, `download_conference`, `download_supplementary`, `download_all`, then `scripture`, `conference`, `supplementary`, `all`. Order matters: download first, then ingest.
+- `download_conference` accepts years: `download_conference 2018-2025`, `download_conference 2015,2018,2020`, or `all`. With no arg and a TTY it prompts interactively (use `docker compose run -it --rm ingest ...`).
 
 ## Setup / environment
 
 - `.env` is required and gitignored; copy `.env.example`. `DATABASE_URL` uses host `db` (docker network).
 - `EMBEDDING_DIMENSIONS` must match your model's output and is **applied at runtime**: schema defaults to `vector(1024)`, but both `app/lib/db.ts:19` and `ingest/lib/db_schema.py` `ALTER` the `chunks.embedding` column on connect. Keep the two in sync when changing it.
 - `EMBEDDING_DIMENSIONS` mismatch is a top source of "no quotes found" — check the Status page (DB chunk count, LLM/Embeddings connection).
+- Reasoning models (Qwen3.x, default `LLM_ENABLE_THINKING=true`) spend output budget on thinking tokens; if `LLM_MAX_TOKENS` is too low the extraction JSON gets truncated and the UI shows "no quotes found". `search.ts` retries once with thinking disabled on parse failure. If it still fails, look for `[Search] ... failed validation` + tail in web logs.
 - `docker compose down -v` wipes `pgdata` and `ingestdata` volumes → must re-download and re-ingest. Prefer not to use `-v` casually.
 
 ## Architecture / wiring
