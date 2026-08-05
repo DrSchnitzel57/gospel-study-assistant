@@ -40,3 +40,7 @@ pgdata/
 # Logs
 *.log
 logs/
+
+# Build artifacts
+*.tsbuildinfo
+.next/

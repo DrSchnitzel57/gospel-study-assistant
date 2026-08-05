@@ -34,7 +34,9 @@ setInterval(() => {
 
 export async function POST(req: Request) {
   try {
-    const ip = req.headers.get('x-forwarded-for') || 'default-client';
+    // x-forwarded-for may be a comma-separated chain (proxies); use the leftmost client IP.
+    const xff = (req.headers.get('x-forwarded-for') || '').split(',')[0].trim();
+    const ip = xff || req.headers.get('x-real-ip') || 'default-client';
     if (isRateLimited(ip)) {
       return NextResponse.json(
         { error: 'Too many requests. Please wait a moment before searching again.' },

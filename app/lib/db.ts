@@ -52,6 +52,16 @@ async function ensureVectorIndex(): Promise<void> {
 function getPool(): Pool {
   if (poolInstance) return poolInstance;
 
+  // Reuse the cached pool on hot reloads (dev) instead of creating a new,
+  // orphaned Pool each time the module is re-evaluated.
+  if (process.env.NODE_ENV !== 'production') {
+    const globalAny = globalThis as any;
+    if (globalAny.__dbPool) {
+      poolInstance = globalAny.__dbPool;
+      return poolInstance!;
+    }
+  }
+
   const databaseUrl = process.env.DATABASE_URL || 'postgresql://gospel:gospelpass@db:5432/gospel_db';
   poolInstance = new Pool({
     connectionString: databaseUrl,
@@ -66,11 +76,7 @@ function getPool(): Pool {
 
   if (process.env.NODE_ENV !== 'production') {
     const globalAny = globalThis as any;
-    if (!globalAny.__dbPool) {
-      globalAny.__dbPool = poolInstance;
-    } else {
-      poolInstance = globalAny.__dbPool;
-    }
+    globalAny.__dbPool = poolInstance;
   }
 
   return poolInstance!;

@@ -341,6 +341,21 @@ async function keywordSearch(
       whereClauses.push(`d.content_category IN (${placeholders})`);
       params.push(...filters.categories);
     }
+    if (filters.sourceTypes && filters.sourceTypes.length > 0) {
+      const placeholders = filters.sourceTypes.map(() => `$${paramIndex++}`).join(', ');
+      whereClauses.push(`d.source_type IN (${placeholders})`);
+      params.push(...filters.sourceTypes);
+    }
+    if (filters.officialStatuses && filters.officialStatuses.length > 0) {
+      const placeholders = filters.officialStatuses.map(() => `$${paramIndex++}`).join(', ');
+      whereClauses.push(`d.official_status IN (${placeholders})`);
+      params.push(...filters.officialStatuses);
+    }
+    if (filters.doctrinalWeights && filters.doctrinalWeights.length > 0) {
+      const placeholders = filters.doctrinalWeights.map(() => `$${paramIndex++}`).join(', ');
+      whereClauses.push(`d.doctrinal_weight IN (${placeholders})`);
+      params.push(...filters.doctrinalWeights);
+    }
     if (filters.historyMode) {
       whereClauses.push(`d.official_status = 'official'`);
       whereClauses.push(`d.content_category = 'history'`);
