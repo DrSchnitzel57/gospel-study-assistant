@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { type ChatCompletionCreateParamsStreaming, type ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
 
 // LLM endpoint (chat completions)
 const LLM_BASE_URL = process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || 'http://localhost:8000/v1';
@@ -117,11 +118,11 @@ export async function callLLM(
     messages: messages as any,
     temperature: 0.1,
     max_tokens: maxTokens,
-  }, {
-    timeout: LLM_TIMEOUT,
     // Extra body param for llama.cpp Qwen3 template; not part of the SDK's
-    // ChatCompletion params type, so passed via RequestOptions.
-    body: { chat_template_kwargs: { enable_thinking: enableThinking } },
+    // ChatCompletion params type, so the params object is cast.
+    chat_template_kwargs: { enable_thinking: enableThinking },
+  } as ChatCompletionCreateParamsNonStreaming, {
+    timeout: LLM_TIMEOUT,
   });
 
   if (!response.choices || response.choices.length === 0) {
@@ -144,9 +145,9 @@ export async function* callLLMStream(
     temperature: 0.1,
     max_tokens: maxTokens,
     stream: true,
-  }, {
+    chat_template_kwargs: { enable_thinking: enableThinking },
+  } as ChatCompletionCreateParamsStreaming, {
     timeout: LLM_TIMEOUT,
-    body: { chat_template_kwargs: { enable_thinking: enableThinking } },
   });
 
   for await (const chunk of stream) {
