@@ -166,6 +166,10 @@ export async function GET() {
       llmTimeout: config.llmTimeout,
       searchMinSimilarity: config.searchMinSimilarity,
       searchMaxChunks: config.searchMaxChunks,
+      searchMaxChunksPerDocument: config.searchMaxChunksPerDocument,
+      searchMaxQuotes: config.searchMaxQuotes,
+      searchMaxQuotesPerSource: config.searchMaxQuotesPerSource,
+      searchMinQuotesPerCategory: config.searchMinQuotesPerCategory,
     },
   });
 }

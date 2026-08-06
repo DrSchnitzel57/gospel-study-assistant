@@ -34,7 +34,7 @@ Ingest (from repo root, needs `db` up and `.env`):
 ## Architecture / wiring
 
 - `@/*` alias in `app/tsconfig.json` maps to the `app/` directory root, so `@/lib/search` = `app/lib/search.ts`.
-- Search pipeline (`app/app/api/search/route.ts` → `app/lib/search.ts`): LLM query decomposition (`decomposeQuery`) → multi-vector pgvector cosine search (one embedding per decomposed query, unioned; `SEARCH_MIN_SIMILARITY`, default 0.15) + FTS keyword fallback → LLM extracts verbatim quotes → fuzzy `validateQuotesAgainstChunks` (in `app/lib/validation.ts`, ~0.7 overlap, stopwords stripped) filters hallucinations. 20 req/min IP rate limit in the route.
+- Search pipeline (`app/app/api/search/route.ts` → `app/lib/search.ts`): LLM query decomposition (`decomposeQuery`) → multi-vector pgvector cosine search (one embedding per decomposed query, unioned; `SEARCH_MIN_SIMILARITY`, default 0.15) + FTS keyword fallback → `selectDiverseChunks` round-robins context across selected categories (≤`SEARCH_MAX_CHUNKS_PER_DOCUMENT`=3 chunks/source) → LLM extracts verbatim quotes → fuzzy `annotateAndValidateQuotes` (`app/lib/validation.ts`, ~0.55 overlap, stopwords stripped) drops hallucinations and stamps each quote with the matched chunk's authoritative source/category → `diversifyQuotes` caps quotes at `SEARCH_MAX_QUOTES_PER_SOURCE`=3/source with a `SEARCH_MIN_QUOTES_PER_CATEGORY`=2 minimum per selected category (`SEARCH_MAX_QUOTES`=20 default). Category metadata lives once in `app/lib/categories.ts`. 20 req/min IP rate limit in the route.
 - `app/next.config.js` sets `output: 'standalone'`; `Dockerfile.web` copies `node_modules` separately because the standalone bundle omits native `pg`/`pgvector`.
 - The ingest host dir `./ingest/data` is bind-mounted into the ingest container at `/app/data` (read-write) and into the `web` container at `/app/ingestdata` (read-only) so the Status page (`app/app/status/page.tsx`, fed by `app/app/api/status/route.ts`) can compare downloaded files on disk vs `documents`/`chunks` rows (per `content_category`). The only scripture subdir is `data/scriptures/` (not `scripts/`). Override the scan path locally via `INGEST_DATA_DIR`.
 - `docker compose down -v` wipes `pgdata` only — downloads now live in `./ingest/data` on the host and survive deletion of the volumes.
@@ -43,6 +43,6 @@ Ingest (from repo root, needs `db` up and `.env`):
 
 ## Gotchas
 
-- `validateQuotesAgainstChunks` is active in `app/lib/search.ts` using the fuzzy word-overlap version (not strict substring). It was previously commented out (git `70d09a9`) because strict matching dropped valid quotes; keep the fuzzy version enabled.
+- `annotateAndValidateQuotes` is active in `app/lib/search.ts` using the fuzzy word-overlap version (~0.55, stopwords stripped), replacing the older boolean-only `validateQuotesAgainstChunks`. It was previously commented out (git `70d09a9`) because strict matching dropped valid quotes; keep the fuzzy version enabled.
 - Zod enums in LLM response parsing were loosened to `z.string()` to avoid silent failures (git `70d09a9`).
 - Keep `EMBEDDING_DIMENSIONS`, `.env.example`, `db/init/01-schema.sql`, `app/lib/db.ts`, and `ingest/lib/db_schema.py` consistent with each other.

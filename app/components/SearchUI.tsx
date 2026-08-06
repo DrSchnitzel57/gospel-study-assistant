@@ -1,17 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import QuoteCard from './QuoteCard';
 import SourceToggle from './SourceToggle';
+import { CATEGORIES, DEFAULT_CATEGORIES, getCategory } from '@/lib/categories';
 import type { Quote } from '@/lib/validation';
-
-const CATEGORIES = [
-  { id: 'scripture', label: 'Scriptures', default: true },
-  { id: 'conference', label: 'Conference', default: true },
-  { id: 'manual', label: 'Manuals', default: true },
-  { id: 'devotional', label: 'Devotionals', default: true },
-  { id: 'history', label: 'History', default: false },
-];
 
 export default function SearchUI() {
   const [query, setQuery] = useState('');
@@ -21,7 +14,7 @@ export default function SearchUI() {
   const [error, setError] = useState('');
   const [historyMode, setHistoryMode] = useState(false);
   const [enabledCategories, setEnabledCategories] = useState<string[]>(
-    CATEGORIES.filter(c => c.default).map(c => c.id)
+    DEFAULT_CATEGORIES
   );
   const [loadingTime, setLoadingTime] = useState(0);
   const [loadingTimer, setLoadingTimer] = useState<ReturnType<typeof setInterval> | null>(null);
@@ -110,6 +103,27 @@ export default function SearchUI() {
         : [...prev, categoryId]
     );
   }
+
+  // Group quotes into sections per category, in canonical category order.
+  const groupedResults = useMemo(() => {
+    if (results.length === 0) return [];
+    const groups = new Map<string, Quote[]>();
+    for (const quote of results) {
+      const list = groups.get(quote.content_category) || [];
+      list.push(quote);
+      groups.set(quote.content_category, list);
+    }
+    const ordered = [] as Array<{ categoryId: string; quotes: Quote[] }>;
+    for (const cat of CATEGORIES) {
+      const list = groups.get(cat.id);
+      if (list && list.length > 0) ordered.push({ categoryId: cat.id, quotes: list });
+      groups.delete(cat.id);
+    }
+    for (const [catId, list] of groups) {
+      if (list.length > 0) ordered.push({ categoryId: catId, quotes: list });
+    }
+    return ordered;
+  }, [results]);
 
   // Loading status messages based on elapsed time
   const getLoadingMessage = () => {
@@ -235,13 +249,33 @@ export default function SearchUI() {
       )}
 
       {results.length > 0 && !loading && (
-        <div className="space-y-4">
-          <p className="text-sm text-gray-500 mb-4">
+        <div className="space-y-8">
+          <p className="text-sm text-gray-500">
             Found {results.length} direct quote{results.length !== 1 ? 's' : ''}
           </p>
-          {results.map((quote: Quote, index: number) => (
-            <QuoteCard key={index} quote={quote} />
-          ))}
+
+          {groupedResults.map((group) => {
+            const category = getCategory(group.categoryId);
+            return (
+              <section key={group.categoryId}>
+                <div className="flex items-center gap-2 mb-3">
+                  <h2
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold border ${category.chipClass}`}
+                  >
+                    {category.label}
+                  </h2>
+                  <span className="text-xs text-gray-400">
+                    {group.quotes.length} quote{group.quotes.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="space-y-4">
+                  {group.quotes.map((quote: Quote, index: number) => (
+                    <QuoteCard key={index} quote={quote} />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>

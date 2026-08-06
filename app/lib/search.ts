@@ -1,13 +1,18 @@
 import pool from '@/lib/db';
 import { getEmbeddings, callLLM } from '@/lib/llm';
-import { extractJSONFromLLMOutput, validateLLMResponse, validateQuotesAgainstChunks, type LLMResponse } from '@/lib/validation';
+import { extractJSONFromLLMOutput, validateLLMResponse, annotateAndValidateQuotes, diversifyQuotes, type LLMResponse, type ChunkWithMetadata } from '@/lib/validation';
+import { ALL_CATEGORY_IDS } from '@/lib/categories';
 
 const MAX_CONTEXT_CHARS = 24000;
 const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '3', 10);
 const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '25', 10);
+const MAX_CHUNKS_PER_DOCUMENT = parseInt(process.env.SEARCH_MAX_CHUNKS_PER_DOCUMENT || '3', 10);
 const MAX_DECOMPOSED_QUERIES = 6;
 const MAX_KEYWORD_FALLBACK_CHUNKS = 15;
+const MAX_QUOTES = parseInt(process.env.SEARCH_MAX_QUOTES || '20', 10);
+const MAX_QUOTES_PER_SOURCE = parseInt(process.env.SEARCH_MAX_QUOTES_PER_SOURCE || '3', 10);
+const MIN_QUOTES_PER_CATEGORY = parseInt(process.env.SEARCH_MIN_QUOTES_PER_CATEGORY || '2', 10);
 
 const QUERY_EXPANSIONS: Record<string, string[]> = {
   // Mental health / psychological conditions
@@ -117,7 +122,9 @@ GUIDELINES:
 - Be generous and broad: include every chunk that could meaningfully help the person, even if the connection is topical or pastoral rather than word-for-word.
 - Extract the key verbatim passage from each relevant chunk (at least a sentence or two).
 - Include the source attribution for each quote.
-- Aim to return as many relevant quotes as possible (up to 25).
+- Spread your selections across ALL content categories present in the chunks (scripture, conference, manual, devotional, history) — do not skip a category that has relevant material.
+- Do not return more than ${MAX_QUOTES_PER_SOURCE} quotes from any single source document — prefer one strong quote per source over many from one source.
+- Aim to return as many relevant quotes as possible (up to ${MAX_QUOTES}).
 - Do NOT fabricate or paraphrase quotes — only quote text that appears verbatim in the provided chunks.
 - If no relevant content exists, set "no_results" to true.
 
@@ -178,7 +185,7 @@ export function buildUserPrompt(
     includedChunks++;
   }
 
-  prompt += `\nExtract all relevant quotes from the chunks above that relate to the user's query. Return up to 20 quotes. Be generous in what you consider relevant. If no relevant quotes exist, set no_results to true.`;
+  prompt += `\nExtract all relevant quotes from the chunks above that relate to the user's query. Return up to ${MAX_QUOTES} quotes, with no more than ${MAX_QUOTES_PER_SOURCE} from any single source document, and spread coverage across every content category present in the chunks. Be generous in what you consider relevant. If no relevant quotes exist, set no_results to true.`;
   return prompt;
 }
 
@@ -193,6 +200,80 @@ type ChunkRow = {
   content_category: string;
   similarity: number;
 };
+
+/**
+ * Diversifies the retrieved chunks so the LLM context spans sources and
+ * categories instead of being dominated by a few very similar documents.
+ * Pass 1 round-robins across the active categories (canonical order), giving
+ * each up to ceil(limit / numCategories) slots and at most
+ * MAX_CHUNKS_PER_DOCUMENT chunks per source. Pass 2 fills any remaining slots
+ * with the best chunks by similarity (still per-document capped).
+ * The selection order doubles as the prompt order, fixing prompt-order bias.
+ */
+export function activeCategorySelection(
+  categories?: string[]
+): string[] {
+  return categories && categories.length > 0 ? categories : ALL_CATEGORY_IDS;
+}
+
+export function selectDiverseChunks(
+  allChunks: ChunkRow[],
+  categories: string[],
+  limit: number,
+  maxPerDoc: number = MAX_CHUNKS_PER_DOCUMENT
+): ChunkRow[] {
+  if (allChunks.length <= limit) return allChunks.slice(0, limit).sort((a, b) => b.similarity - a.similarity);
+
+  const pools = new Map<string, ChunkRow[]>();
+  for (const cat of categories) {
+    pools.set(cat, []);
+  }
+  for (const chunk of allChunks) {
+    const pool = pools.get(chunk.content_category) || [];
+    pool.push(chunk);
+    pools.set(chunk.content_category, pool);
+  }
+  for (const pool of pools.values()) {
+    pool.sort((a, b) => b.similarity - a.similarity);
+  }
+
+  const perDocCount = new Map<string, number>();
+  const selected: ChunkRow[] = [];
+  const taken = new Set<ChunkRow>();
+
+  const canTake = (chunk: ChunkRow): boolean =>
+    !taken.has(chunk) && (perDocCount.get(chunk.document_title) || 0) < maxPerDoc;
+
+  const take = (chunk: ChunkRow) => {
+    taken.add(chunk);
+    perDocCount.set(chunk.document_title, (perDocCount.get(chunk.document_title) || 0) + 1);
+    selected.push(chunk);
+  };
+
+  const perCatBudget = Math.ceil(limit / categories.length);
+
+  // Pass 1 — round-robin so every selected category gets context.
+  for (let i = 0; i < perCatBudget && selected.length < limit; i++) {
+    for (const cat of categories) {
+      if (selected.length >= limit) break;
+      const pool = pools.get(cat) || [];
+      const next = pool.find((c) => canTake(c));
+      if (next) take(next);
+    }
+  }
+
+  // Pass 2 — fill leftovers with the best remaining chunks by similarity.
+  const remaining = allChunks.filter(canTake).sort((a, b) => b.similarity - a.similarity);
+  for (const chunk of remaining) {
+    if (selected.length >= limit) break;
+    take(chunk);
+  }
+
+  console.log(
+    `[Search] Diversity: ${categories.length} categories, budget ${perCatBudget}/cat, max ${maxPerDoc}/source → selected ${selected.length}/${allChunks.length} chunks`
+  );
+  return selected;
+}
 
 export async function searchChunks(
   embeddingQueries: string[],
@@ -291,7 +372,8 @@ export async function searchChunks(
     console.log(`[Search] Multi-vector: top=${topSim}, unique_above_threshold(${MIN_SIMILARITY})=${allChunks.length} across ${embeddings.length} queries`);
   }
 
-  const vectorChunks = allChunks.slice(0, MAX_CHUNKS);
+  const activeCategories = activeCategorySelection(filters.categories);
+  const vectorChunks = selectDiverseChunks(allChunks, activeCategories, MAX_CHUNKS);
 
   // Keyword fallback: boost recall for named references (e.g. "Alma 32", "3 Nephi 11")
   const keywordChunks = await keywordSearch(embeddingQueries[0], filters, vectorChunks);
@@ -304,7 +386,7 @@ export async function searchChunks(
     }
   }
 
-  return [...merged.values()].sort((a, b) => b.similarity - a.similarity).slice(0, MAX_CHUNKS);
+  return selectDiverseChunks([...merged.values()], activeCategories, MAX_CHUNKS);
 }
 
 async function keywordSearch(
@@ -444,6 +526,17 @@ export async function search(query: string, filters: {
     return { quotes: [], no_results: true };
   }
 
+  const before = quoted.quotes.length;
+  quoted.quotes = diversifyQuotes(quoted.quotes, {
+    maxTotal: MAX_QUOTES,
+    maxPerSource: MAX_QUOTES_PER_SOURCE,
+    minPerCategory: MIN_QUOTES_PER_CATEGORY,
+    selectedCategories: filters.categories,
+  });
+  if (quoted.quotes.length !== before) {
+    console.log(`[Search] Diversity: capped ${before} → ${quoted.quotes.length} quotes (max ${MAX_QUOTES_PER_SOURCE}/source, min ${MIN_QUOTES_PER_CATEGORY}/category)`);
+  }
+
   console.log(`[Search] Total time: ${Date.now() - t0}ms, returning ${quoted.quotes.length} quotes`);
   return quoted;
 }
@@ -513,7 +606,7 @@ function tryParseQuotes(rawOutput: string): LLMResponse | null {
 
 function validateQuotes(parsed: LLMResponse, chunks: ChunkRow[]): LLMResponse {
   const beforeCount = parsed.quotes.length;
-  parsed.quotes = validateQuotesAgainstChunks(parsed.quotes, chunks);
+  parsed.quotes = annotateAndValidateQuotes(parsed.quotes, chunks as ChunkWithMetadata[]);
   const afterCount = parsed.quotes.length;
 
   if (beforeCount !== afterCount) {

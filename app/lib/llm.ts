@@ -55,6 +55,10 @@ export function getConfig() {
     embeddingUrlIsFallback: !(process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL),
     searchMinSimilarity: parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15'),
     searchMaxChunks: parseInt(process.env.SEARCH_MAX_CHUNKS || '25', 10),
+    searchMaxChunksPerDocument: parseInt(process.env.SEARCH_MAX_CHUNKS_PER_DOCUMENT || '3', 10),
+    searchMaxQuotes: parseInt(process.env.SEARCH_MAX_QUOTES || '20', 10),
+    searchMaxQuotesPerSource: parseInt(process.env.SEARCH_MAX_QUOTES_PER_SOURCE || '3', 10),
+    searchMinQuotesPerCategory: parseInt(process.env.SEARCH_MIN_QUOTES_PER_CATEGORY || '2', 10),
   };
 }
 

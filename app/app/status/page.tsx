@@ -16,7 +16,7 @@ interface StatusData {
   llm: { connected: boolean; model: string; baseUrl: string; pingTime: number | null; enableThinking: boolean; maxTokens: number; urlIsFallback: boolean; error?: string };
   embedding: { connected: boolean; model: string; baseUrl: string; dimensions: number; pingTime: number | null; urlIsFallback: boolean; error?: string };
   download: { mounted: boolean; sources: DownloadSource[] };
-  config: { llmTimeout: number; searchMinSimilarity: number; searchMaxChunks: number };
+  config: { llmTimeout: number; searchMinSimilarity: number; searchMaxChunks: number; searchMaxChunksPerDocument: number; searchMaxQuotes: number; searchMaxQuotesPerSource: number; searchMinQuotesPerCategory: number };
 }
 
 function StatusBadge({ connected, error }: { connected: boolean; error?: string }) {
@@ -353,6 +353,22 @@ export default function StatusPage() {
           <div className="flex justify-between border-b border-gray-100 py-1.5">
             <span className="text-gray-500">SEARCH_MAX_CHUNKS</span>
             <span className="font-mono">{status?.config.searchMaxChunks ?? '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 py-1.5">
+            <span className="text-gray-500">SEARCH_MAX_CHUNKS_PER_DOCUMENT</span>
+            <span className="font-mono">{status?.config.searchMaxChunksPerDocument ?? '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 py-1.5">
+            <span className="text-gray-500">SEARCH_MAX_QUOTES</span>
+            <span className="font-mono">{status?.config.searchMaxQuotes ?? '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 py-1.5">
+            <span className="text-gray-500">SEARCH_MAX_QUOTES_PER_SOURCE</span>
+            <span className="font-mono">{status?.config.searchMaxQuotesPerSource ?? '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 py-1.5">
+            <span className="text-gray-500">SEARCH_MIN_QUOTES_PER_CATEGORY</span>
+            <span className="font-mono">{status?.config.searchMinQuotesPerCategory ?? '—'}</span>
           </div>
           <div className="flex justify-between border-b border-gray-100 py-1.5">
             <span className="text-gray-500">LLM_MAX_TOKENS</span>
