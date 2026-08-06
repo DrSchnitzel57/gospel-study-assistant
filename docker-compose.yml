@@ -8,9 +8,10 @@ services:
     env_file:
       - .env
     volumes:
-      # Read-only view of the ingest volume so the Status page can report what
-      # has been downloaded (files on disk) vs ingested (rows in Postgres).
-      - ingestdata:/app/ingestdata:ro
+      # Read-only view of the ingest data directory so the Status page can
+      # report what has been downloaded (files on disk) vs ingested (rows in
+      # Postgres). The ingest service gets the read-write bind mount below.
+      - ./ingest/data:/app/ingestdata:ro
     depends_on:
       db:
         condition: service_healthy
@@ -48,9 +49,10 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ingestdata:/app/data
+      # Bind mount so downloaded files land directly under ./ingest/data on the
+      # host (visible in the repo, easy to browse/back up).
+      - ./ingest/data:/app/data
     restart: "no"
 
 volumes:
   pgdata:
-  ingestdata:

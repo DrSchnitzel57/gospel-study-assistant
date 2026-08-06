@@ -29,14 +29,15 @@ Ingest (from repo root, needs `db` up and `.env`):
 - `EMBEDDING_DIMENSIONS` must match your model's output and is **applied at runtime**: schema defaults to `vector(1024)`, but both `app/lib/db.ts:19` and `ingest/lib/db_schema.py` `ALTER` the `chunks.embedding` column on connect. Keep the two in sync when changing it.
 - `EMBEDDING_DIMENSIONS` mismatch is a top source of "no quotes found" — check the Status page (DB chunk count, LLM/Embeddings connection).
 - Reasoning models (Qwen3.x, default `LLM_ENABLE_THINKING=true`) spend output budget on thinking tokens; if `LLM_MAX_TOKENS` is too low the extraction JSON gets truncated and the UI shows "no quotes found". `search.ts` retries once with thinking disabled on parse failure. If it still fails, look for `[Search] ... failed validation` + tail in web logs.
-- `docker compose down -v` wipes `pgdata` and `ingestdata` volumes → must re-download and re-ingest. Prefer not to use `-v` casually.
+- `docker compose down -v` wipes `pgdata` only — downloads now live in `./ingest/data` on the host and survive deletion of the volumes. Prefer not to use `-v` casually.
 
 ## Architecture / wiring
 
 - `@/*` alias in `app/tsconfig.json` maps to the `app/` directory root, so `@/lib/search` = `app/lib/search.ts`.
 - Search pipeline (`app/app/api/search/route.ts` → `app/lib/search.ts`): LLM query decomposition (`decomposeQuery`) → multi-vector pgvector cosine search (one embedding per decomposed query, unioned; `SEARCH_MIN_SIMILARITY`, default 0.15) + FTS keyword fallback → LLM extracts verbatim quotes → fuzzy `validateQuotesAgainstChunks` (in `app/lib/validation.ts`, ~0.7 overlap, stopwords stripped) filters hallucinations. 20 req/min IP rate limit in the route.
 - `app/next.config.js` sets `output: 'standalone'`; `Dockerfile.web` copies `node_modules` separately because the standalone bundle omits native `pg`/`pgvector`.
-- The `web` container mounts the `ingestdata` volume read-only at `/app/ingestdata` so the Status page (`app/app/status/page.tsx`, fed by `app/app/api/status/route.ts`) can compare downloaded files on disk vs `documents`/`chunks` rows (per `content_category`). The volume maps to `ingest/data/` in the ingest container; the only scripture subdir is `data/scriptures/` (not `scripts/`). Override the scan path locally via `INGEST_DATA_DIR`.
+- The ingest host dir `./ingest/data` is bind-mounted into the ingest container at `/app/data` (read-write) and into the `web` container at `/app/ingestdata` (read-only) so the Status page (`app/app/status/page.tsx`, fed by `app/app/api/status/route.ts`) can compare downloaded files on disk vs `documents`/`chunks` rows (per `content_category`). The only scripture subdir is `data/scriptures/` (not `scripts/`). Override the scan path locally via `INGEST_DATA_DIR`.
+- `docker compose down -v` wipes `pgdata` only — downloads now live in `./ingest/data` on the host and survive deletion of the volumes.
 - Ingest scripts import helpers via `sys.path.insert(0, ../lib)` → `from llm import`, `from db_schema import`, `from db import` (see `ingest/scripts/ingest_scriptures.py:3-7`).
 - Conference download uses Playwright (Chromium installed in `Dockerfile.ingest`); other downloads use requests + BeautifulSoup.
 
