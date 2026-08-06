@@ -16,7 +16,7 @@ interface StatusData {
   llm: { connected: boolean; model: string; baseUrl: string; pingTime: number | null; enableThinking: boolean; maxTokens: number; urlIsFallback: boolean; error?: string };
   embedding: { connected: boolean; model: string; baseUrl: string; dimensions: number; pingTime: number | null; urlIsFallback: boolean; error?: string };
   download: { mounted: boolean; sources: DownloadSource[] };
-  config: { llmTimeout: number; searchMinSimilarity: number; searchMaxChunks: number; searchMaxChunksPerDocument: number; searchMaxQuotes: number; searchMaxQuotesPerSource: number; searchMinQuotesPerCategory: number };
+  config: { llmTimeout: number; searchMinSimilarity: number; searchMaxChunks: number; searchMaxChunksPerDocument: number; searchMaxDecomposedQueries: number; searchMinChunksPerCategory: number; searchCategoryMinSimilarity: number; searchMaxQuotes: number; searchMaxQuotesPerSource: number; searchMinQuotesPerCategory: number };
 }
 
 function StatusBadge({ connected, error }: { connected: boolean; error?: string }) {
@@ -357,6 +357,18 @@ export default function StatusPage() {
           <div className="flex justify-between border-b border-gray-100 py-1.5">
             <span className="text-gray-500">SEARCH_MAX_CHUNKS_PER_DOCUMENT</span>
             <span className="font-mono">{status?.config.searchMaxChunksPerDocument ?? '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 py-1.5">
+            <span className="text-gray-500">SEARCH_MAX_DECOMPOSED_QUERIES</span>
+            <span className="font-mono">{status?.config.searchMaxDecomposedQueries ?? '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 py-1.5">
+            <span className="text-gray-500">SEARCH_MIN_CHUNKS_PER_CATEGORY</span>
+            <span className="font-mono">{status?.config.searchMinChunksPerCategory ?? '—'}</span>
+          </div>
+          <div className="flex justify-between border-b border-gray-100 py-1.5">
+            <span className="text-gray-500">SEARCH_CATEGORY_MIN_SIMILARITY</span>
+            <span className="font-mono">{status?.config.searchCategoryMinSimilarity ?? '—'}</span>
           </div>
           <div className="flex justify-between border-b border-gray-100 py-1.5">
             <span className="text-gray-500">SEARCH_MAX_QUOTES</span>

@@ -8,17 +8,29 @@ const MIN_SIMILARITY = parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15');
 const MIN_CHUNKS_FOR_LLM = parseInt(process.env.SEARCH_MIN_CHUNKS || '3', 10);
 const MAX_CHUNKS = parseInt(process.env.SEARCH_MAX_CHUNKS || '25', 10);
 const MAX_CHUNKS_PER_DOCUMENT = parseInt(process.env.SEARCH_MAX_CHUNKS_PER_DOCUMENT || '3', 10);
-const MAX_DECOMPOSED_QUERIES = 6;
+const MAX_DECOMPOSED_QUERIES = parseInt(process.env.SEARCH_MAX_DECOMPOSED_QUERIES || '10', 10);
+const MIN_CHUNKS_PER_CATEGORY = parseInt(process.env.SEARCH_MIN_CHUNKS_PER_CATEGORY || '2', 10);
+const CATEGORY_MIN_SIMILARITY = parseFloat(
+  process.env.SEARCH_CATEGORY_MIN_SIMILARITY || String(MIN_SIMILARITY * 0.5)
+);
 const MAX_KEYWORD_FALLBACK_CHUNKS = 15;
 const MAX_QUOTES = parseInt(process.env.SEARCH_MAX_QUOTES || '20', 10);
 const MAX_QUOTES_PER_SOURCE = parseInt(process.env.SEARCH_MAX_QUOTES_PER_SOURCE || '3', 10);
 const MIN_QUOTES_PER_CATEGORY = parseInt(process.env.SEARCH_MIN_QUOTES_PER_CATEGORY || '2', 10);
 
+type SearchFilters = {
+  categories?: string[];
+  sourceTypes?: string[];
+  officialStatuses?: string[];
+  doctrinalWeights?: string[];
+  historyMode?: boolean;
+};
+
 const QUERY_EXPANSIONS: Record<string, string[]> = {
   // Mental health / psychological conditions
-  scrupulosity: ['anxiety about sin', 'fear of wrongdoing', 'overly conscientious', 'peace of mind', 'religious anxiety'],
+  scrupulosity: ['anxiety about sin', 'fear of wrongdoing', 'overly conscientious', 'peace of mind', 'religious anxiety', 'worthiness', 'clean hands', 'pure heart', 'broken heart', 'contrite spirit', 'fear of god', 'worthiness anxiety'],
   ocd: ['obsessive thoughts', 'compulsion', 'repetition', 'peace of mind', 'control thoughts', 'worry'],
-  anxiety: ['fear', 'worry', 'peace', 'trust', 'comfort', 'strength', 'calm', 'anxious'],
+  anxiety: ['fear', 'worry', 'peace', 'trust', 'comfort', 'strength', 'calm', 'anxious', 'cast thy burden', 'let not your heart be troubled', 'peace of conscience', 'burden of the Lord'],
   depression: ['despair', 'hope', 'joy', 'sadness', 'comfort', 'healing', 'darkness', 'light', 'grief'],
   addiction: ['temptation', 'bondage', 'weakness', 'strength', 'freedom', 'recovery', 'habit', 'power'],
   trauma: ['suffering', 'pain', 'healing', 'comfort', 'restoration', 'brokenness', 'wounds'],
@@ -37,7 +49,7 @@ const QUERY_EXPANSIONS: Record<string, string[]> = {
   phobia: ['fear', 'anxiety', 'courage', 'bold', 'peace', 'comfort'],
   insomnia: ['sleep', 'rest', 'peace', 'comfort', 'quiet mind', 'worry at night'],
   panic: ['fear', 'anxiety', 'overwhelm', 'peace', 'calm', 'strength'],
-  perfectionism: ['perfection', 'flawless', 'mistakes', 'mercy', 'grace', 'progress', 'good enough'],
+  perfectionism: ['perfection', 'flawless', 'mistakes', 'mercy', 'grace', 'progress', 'good enough', 'worthiness', 'clean hands', 'pure heart', 'unworthy', 'acceptable before God'],
   procrastination: ['delay', 'laziness', 'diligence', 'work', 'purpose', 'action'],
   codependency: ['dependency', 'codependent', 'boundaries', 'enable', 'self sacrifice', 'love others'],
 
@@ -52,6 +64,8 @@ const QUERY_EXPANSIONS: Record<string, string[]> = {
   repentance: ['change of heart', 'turn to god', 'forgiveness', 'confess', 'forsake', 'mercy'],
   revelation: ['holy ghost', 'inspiration', 'spirit', 'still small voice', 'guidance', 'personal revelation'],
   sacrament: ['remembrance', 'bread and water', 'covenant', 'body and blood', 'renew covenants'],
+  worthiness: ['worthy', 'unworthy', 'clean hands', 'pure heart', 'worthiness anxiety', 'worthiness question', 'worth of a soul'],
+  worth: ['dignity', 'self-worth', 'value of the soul', 'priceless', 'precious', 'divine worth'],
 };
 
 export function expandQuery(query: string): string {
@@ -73,23 +87,32 @@ export function expandQuery(query: string): string {
   return expanded;
 }
 
-const DECOMPOSITION_PROMPT = `You are helping a gospel study assistant find relevant scripture and Church resource passages for a user's question.
+function buildDecompositionPrompt(categories?: string[]): string {
+  const categoryLine =
+    categories && categories.length > 0
+      ? `The user has selected these content categories to search: ${categories.join(', ')}.
+Make sure at least ONE of your queries is targeted per selected category, phrased in the vocabulary and register of that corpus. For example, spirituality is stronger when the query leans on scripture idiom ('broken heart and contrite spirit') rather than the user's modern wording.\n\n`
+      : '';
+  return `You are helping a gospel study assistant find relevant scripture and Church resource passages for a user's question.
 
-Rewrite the user's question into ${MAX_DECOMPOSED_QUERIES} diverse search queries that would each surface DIFFERENT relevant passages. The passages may not be literally word-matched to the user's question, so consider:
+Rewrite the user's question into ${MAX_DECOMPOSED_QUERIES} search queries that would each surface DIFFERENT relevant passages. To maximize recall, generate a mix of query facets:
 
-- The literal topic words the user used
-- The doctrinal / gospel vocabulary the Church uses for that topic
-- The underlying need, emotion, or situation behind the question (e.g. anxiety, worthiness, grief, doubt, forgiveness) and the doctrinal principles that address it
-- Relevant scripture figures, stories, or Come Follow Me themes
+1. LITERAL — the direct topic words the user used.
+2. DOCTRINAL — the gospel principle that addresses the underlying need (e.g. worthiness, grace, atonement, sanctification, repentance, the enabling power of Christ).
+3. PASTORAL / EMOTIONAL — the feeling behind the question (anxiety, fear, rejection, inadequacy) and the promise/practice that soothes it.
+4. NARRATIVE / SCRIPTURE-STORY — a scripture story, figure, or theme the user's situation echoes, even if it uses completely different words. For example, feelings of anxious worthiness or perfectionism echo Nephi's lament in 2 Nephi 4 ('my soul is cast down and disquieted within me', 'Why should I yield to sin?'), the publican who would not so much as lift up his eyes, or Mormon's 'my heart is filled with all the love of God'. Phrase this query from the STORY and its theme, not the user's literal words.
 
-Return ONLY a JSON array of strings, one per search query. Keep each query short (a few words to a short phrase). Example:
+${categoryLine}Each query must be phrased in the idiom of the body of text likely to contain the answer, not echoed verbatim from the user. In particular, phrase at least one query in scripture idiom (e.g. 'cast thy burden upon the Lord and He shall sustain thee', 'a broken heart and a contrite spirit', 'my soul is cast down and disquieted within me', 'the Lord is my shepherd there is no want').
+
+Return ONLY a JSON array of ${MAX_DECOMPOSED_QUERIES} short query strings (a few words to a short phrase). Do not include any commentary. Example:
 User: "I feel anxious about whether I'm good enough for God"
-["worthiness and grace", "atonement and healing", "fear and peace of mind", "repentance and self-worth", "God's love and forgiveness", "anxiety comfort strength"]`;
+["worthiness and perfectionism", "the grace of Christ enables our hearts to be enough", "feeling inadequate consolation and the peace of God", "Nephi's lament wisdom feeling far from God, and the Lord's tender love", "fear not for God's goodness covers weakness"]`;
+}
 
-export async function decomposeQuery(query: string): Promise<string[]> {
+export async function decomposeQuery(query: string, categories?: string[]): Promise<string[]> {
   try {
     const raw = await callLLM([
-      { role: 'system', content: DECOMPOSITION_PROMPT },
+      { role: 'system', content: buildDecompositionPrompt(categories) },
       { role: 'user', content: `User question: ${query}` },
     ]);
     const jsonStr = extractJSONFromLLMOutput(raw);
@@ -288,43 +311,13 @@ export async function searchChunks(
   const embeddings = await getEmbeddings(embeddingQueries);
   const results = new Map<number, ChunkRow>();
 
-  const whereClauses: string[] = [];
-  const params: any[] = [];
-  let paramIndex = 1;
-
-  if (filters.categories && filters.categories.length > 0) {
-    const placeholders = filters.categories.map(() => `$${paramIndex++}`).join(', ');
-    whereClauses.push(`d.content_category IN (${placeholders})`);
-    params.push(...filters.categories);
-  }
-
-  if (filters.sourceTypes && filters.sourceTypes.length > 0) {
-    const placeholders = filters.sourceTypes.map(() => `$${paramIndex++}`).join(', ');
-    whereClauses.push(`d.source_type IN (${placeholders})`);
-    params.push(...filters.sourceTypes);
-  }
-
-  if (filters.officialStatuses && filters.officialStatuses.length > 0) {
-    const placeholders = filters.officialStatuses.map(() => `$${paramIndex++}`).join(', ');
-    whereClauses.push(`d.official_status IN (${placeholders})`);
-    params.push(...filters.officialStatuses);
-  }
-
-  if (filters.doctrinalWeights && filters.doctrinalWeights.length > 0) {
-    const placeholders = filters.doctrinalWeights.map(() => `$${paramIndex++}`).join(', ');
-    whereClauses.push(`d.doctrinal_weight IN (${placeholders})`);
-    params.push(...filters.doctrinalWeights);
-  }
-
-  if (filters.historyMode) {
-    whereClauses.push(`d.official_status = 'official'`);
-    whereClauses.push(`d.content_category = 'history'`);
-  }
-
-  const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const activeCategories = activeCategorySelection(filters.categories);
+  const { clauses, params } = buildFilterWhere(filters, { includeCategories: true });
+  const whereStr = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
 
   for (const embedding of embeddings) {
     const embeddingStr = `[${embedding.join(',')}]`;
+    const paramIndex = params.length + 1;
     const sql = `
       SELECT
         c.id,
@@ -350,17 +343,7 @@ export async function searchChunks(
       if (similarity < MIN_SIMILARITY) continue;
       const existing = results.get(row.id);
       if (!existing || similarity > existing.similarity) {
-        results.set(row.id, {
-          id: row.id,
-          text: row.text,
-          document_title: row.document_title,
-          verse_reference: row.verse_reference || '',
-          source_type: row.source_type,
-          official_status: row.official_status,
-          doctrinal_weight: row.doctrinal_weight,
-          content_category: row.content_category,
-          similarity,
-        });
+        results.set(row.id, toChunkRow(row, similarity));
       }
     }
   }
@@ -368,18 +351,41 @@ export async function searchChunks(
   const allChunks = [...results.values()].sort((a, b) => b.similarity - a.similarity);
 
   if (allChunks.length > 0) {
-    const topSim = allChunks[0].similarity.toFixed(4);
-    console.log(`[Search] Multi-vector: top=${topSim}, unique_above_threshold(${MIN_SIMILARITY})=${allChunks.length} across ${embeddings.length} queries`);
+    console.log(`[Search] Multi-vector: top=${allChunks[0].similarity.toFixed(4)}, unique_above_threshold(${MIN_SIMILARITY})=${allChunks.length} across ${embeddings.length} queries`);
   }
 
-  const activeCategories = activeCategorySelection(filters.categories);
   const vectorChunks = selectDiverseChunks(allChunks, activeCategories, MAX_CHUNKS);
 
-  // Keyword fallback: boost recall for named references (e.g. "Alma 32", "3 Nephi 11")
-  const keywordChunks = await keywordSearch(embeddingQueries[0], filters, vectorChunks);
+  // Keyword fallback across EVERY decomposed query (not just the first): boosts
+  // recall for named references (e.g. "Alma 32", "3 Nephi 11") and for scripture-
+  // idiom lexicon that semantic search can miss. Each query excludes results the
+  // previous queries already found.
+  const keywordSeed = [...vectorChunks];
+  const keywordChunks: ChunkRow[] = [];
+  for (const q of embeddingQueries) {
+    if (keywordChunks.length >= 60) break;
+    const kw = await keywordSearch(q, filters, keywordSeed);
+    keywordChunks.push(...kw);
+    keywordSeed.push(...kw);
+  }
+  const keywordPooled = [...new Map(keywordChunks.map((c) => [c.id, c])).values()]
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, MAX_KEYWORD_FALLBACK_CHUNKS * 2);
 
   const merged = new Map<number, ChunkRow>();
-  for (const c of [...keywordChunks, ...vectorChunks]) {
+  for (const c of [...keywordPooled, ...vectorChunks]) {
+    const existing = merged.get(c.id);
+    if (!existing || c.similarity > existing.similarity) {
+      merged.set(c.id, c);
+    }
+  }
+
+  // Rescue floor: if a selected category produced no/few chunks above the main
+  // threshold, run a category-scoped vector search at a relaxed similarity plus
+  // a category-scoped keyword pass so the LLM always gets material for every
+  // selected category. Accuracy stays guarded downstream by annotation.
+  const rescueChunks = await rescueWeakCategories(embeddingQueries, filters, merged, activeCategories);
+  for (const c of rescueChunks) {
     const existing = merged.get(c.id);
     if (!existing || c.similarity > existing.similarity) {
       merged.set(c.id, c);
@@ -389,16 +395,141 @@ export async function searchChunks(
   return selectDiverseChunks([...merged.values()], activeCategories, MAX_CHUNKS);
 }
 
+function toChunkRow(row: any, similarity: number): ChunkRow {
+  return {
+    id: row.id,
+    text: row.text,
+    document_title: row.document_title,
+    verse_reference: row.verse_reference || '',
+    source_type: row.source_type,
+    official_status: row.official_status,
+    doctrinal_weight: row.doctrinal_weight,
+    content_category: row.content_category,
+    similarity,
+  };
+}
+
+/**
+ * Builds the SQL WHERE clauses (and params) shared by every search path.
+ * `category` overrides the IN-list with a single category (used by rescues).
+ */
+function buildFilterWhere(
+  filters: SearchFilters,
+  opts: { includeCategories?: boolean; category?: string } = {}
+): { clauses: string[]; params: any[] } {
+  const clauses: string[] = [];
+  const params: any[] = [];
+  let p = 1;
+
+  if (opts.category) {
+    params.push(opts.category);
+    clauses.push(`d.content_category = $${p++}`);
+  } else if (opts.includeCategories !== false && filters.categories && filters.categories.length > 0) {
+    const placeholders = filters.categories.map(() => `$${p++}`).join(', ');
+    clauses.push(`d.content_category IN (${placeholders})`);
+    params.push(...filters.categories);
+  }
+
+  if (filters.sourceTypes && filters.sourceTypes.length > 0) {
+    const placeholders = filters.sourceTypes.map(() => `$${p++}`).join(', ');
+    clauses.push(`d.source_type IN (${placeholders})`);
+    params.push(...filters.sourceTypes);
+  }
+  if (filters.officialStatuses && filters.officialStatuses.length > 0) {
+    const placeholders = filters.officialStatuses.map(() => `$${p++}`).join(', ');
+    clauses.push(`d.official_status IN (${placeholders})`);
+    params.push(...filters.officialStatuses);
+  }
+  if (filters.doctrinalWeights && filters.doctrinalWeights.length > 0) {
+    const placeholders = filters.doctrinalWeights.map(() => `$${p++}`).join(', ');
+    clauses.push(`d.doctrinal_weight IN (${placeholders})`);
+    params.push(...filters.doctrinalWeights);
+  }
+  if (filters.historyMode) {
+    clauses.push(`d.official_status = 'official'`);
+    if (!opts.category) clauses.push(`d.content_category = 'history'`);
+  }
+  return { clauses, params };
+}
+
+async function runVectorSearch(
+  queryText: string,
+  filters: SearchFilters,
+  opts: { category?: string; threshold: number; limit: number }
+): Promise<ChunkRow[]> {
+  const embedding = (await getEmbeddings([queryText]))[0];
+  const { clauses, params } = buildFilterWhere(filters, { includeCategories: false, category: opts.category });
+  const whereStr = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const paramIndex = params.length + 1;
+
+  const sql = `
+    SELECT
+      c.id,
+      c.text,
+      c.verse_reference,
+      d.title as document_title,
+      d.source_type,
+      d.official_status,
+      d.doctrinal_weight,
+      d.content_category,
+      1 - (c.embedding <=> $${paramIndex}::vector) as similarity
+    FROM chunks c
+    JOIN documents d ON c.document_id = d.id
+    ${whereStr}
+    ORDER BY c.embedding <=> $${paramIndex}::vector
+    LIMIT ${opts.limit}
+  `;
+
+  const result = await pool.query(sql, [...params, `[${embedding.join(',')}]`]);
+  const rows: ChunkRow[] = [];
+  for (const row of result.rows) {
+    const similarity = parseFloat(row.similarity);
+    if (similarity < opts.threshold) continue;
+    rows.push(toChunkRow(row, similarity));
+  }
+  return rows;
+}
+
+async function rescueWeakCategories(
+  queries: string[],
+  filters: SearchFilters,
+  pool: Map<number, ChunkRow>,
+  activeCategories: string[]
+): Promise<ChunkRow[]> {
+  const counts = new Map<string, number>();
+  for (const c of pool.values()) {
+    counts.set(c.content_category, (counts.get(c.content_category) || 0) + 1);
+  }
+
+  const probe = queries.join(' ').slice(0, 600);
+  const rescued: ChunkRow[] = [];
+
+  for (const cat of activeCategories) {
+    if (filters.historyMode && cat !== 'history') continue;
+    const count = counts.get(cat) || 0;
+    if (count >= MIN_CHUNKS_PER_CATEGORY) continue;
+    console.log(`[Search] Rescue: category "${cat}" under ${MIN_CHUNKS_PER_CATEGORY} chunks (${count} found) — relaxing to ${CATEGORY_MIN_SIMILARITY} + keyword`);
+    try {
+      const vector = await runVectorSearch(probe, filters, {
+        category: cat,
+        threshold: CATEGORY_MIN_SIMILARITY,
+        limit: 20,
+      });
+      const keyword = await keywordSearch(probe, filters, [...pool.values()], cat);
+      rescued.push(...vector, ...keyword);
+    } catch (e) {
+      console.log(`[Search] Rescue failed for "${cat}": ${e instanceof Error ? e.message : 'unknown'}`);
+    }
+  }
+
+  return rescued;
+}
+
 async function keywordSearch(
   query: string,
-  filters: {
-    categories?: string[];
-    sourceTypes?: string[];
-    officialStatuses?: string[];
-    doctrinalWeights?: string[];
-    historyMode?: boolean;
-  },
-  alreadyFound: ChunkRow[]
+  filters: SearchFilters,
+  alreadyFound: ChunkRow[],
+  onlyCategory?: string
 ): Promise<ChunkRow[]> {
   try {
     const words = query
@@ -418,7 +549,10 @@ async function keywordSearch(
     let params: any[] = [query, tsqueryOr];
     let paramIndex = 3;
 
-    if (filters.categories && filters.categories.length > 0) {
+    if (onlyCategory) {
+      whereClauses.push(`d.content_category = $${paramIndex++}`);
+      params.push(onlyCategory);
+    } else if (filters.categories && filters.categories.length > 0) {
       const placeholders = filters.categories.map(() => `$${paramIndex++}`).join(', ');
       whereClauses.push(`d.content_category IN (${placeholders})`);
       params.push(...filters.categories);
@@ -499,7 +633,10 @@ export async function search(query: string, filters: {
   const t0 = Date.now();
 
   console.log(`[Search] Query: "${query.slice(0, 80)}"...`);
-  const queries = await decomposeQuery(query);
+  const decompositionCategories = filters.historyMode
+    ? ['history']
+    : activeCategorySelection(filters.categories);
+  const queries = await decomposeQuery(query, decompositionCategories);
   const chunks = await searchChunks(queries, filters);
   console.log(`[Search] Found ${chunks.length} relevant chunks in ${Date.now() - t0}ms`);
 

@@ -254,28 +254,30 @@ export default function SearchUI() {
             Found {results.length} direct quote{results.length !== 1 ? 's' : ''}
           </p>
 
-          {groupedResults.map((group) => {
-            const category = getCategory(group.categoryId);
-            return (
-              <section key={group.categoryId}>
-                <div className="flex items-center gap-2 mb-3">
-                  <h2
-                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold border ${category.chipClass}`}
-                  >
-                    {category.label}
-                  </h2>
-                  <span className="text-xs text-gray-400">
-                    {group.quotes.length} quote{group.quotes.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <div className="space-y-4">
-                  {group.quotes.map((quote: Quote, index: number) => (
-                    <QuoteCard key={index} quote={quote} />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-start">
+            {groupedResults.map((group) => {
+              const category = getCategory(group.categoryId);
+              return (
+                <section key={group.categoryId} className="min-w-0">
+                  <div className="flex items-center gap-2 mb-3">
+                    <h2
+                      className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold border ${category.chipClass}`}
+                    >
+                      {category.label}
+                    </h2>
+                    <span className="text-xs text-gray-400">
+                      {group.quotes.length} quote{group.quotes.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="space-y-4">
+                    {group.quotes.map((quote: Quote, index: number) => (
+                      <QuoteCard key={index} quote={quote} />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
