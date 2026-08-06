@@ -7,6 +7,10 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    volumes:
+      # Read-only view of the ingest volume so the Status page can report what
+      # has been downloaded (files on disk) vs ingested (rows in Postgres).
+      - ingestdata:/app/ingestdata:ro
     depends_on:
       db:
         condition: service_healthy

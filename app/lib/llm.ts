@@ -45,9 +45,16 @@ export function getConfig() {
   return {
     llmBaseUrl: LLM_BASE_URL,
     llmModel: LLM_MODEL,
+    llmTimeout: LLM_TIMEOUT,
+    llmEnableThinking: LLM_ENABLE_THINKING,
+    llmMaxTokens: LLM_MAX_TOKENS,
+    llmUrlIsFallback: !(process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL),
     embeddingBaseUrl: EMBEDDING_BASE_URL,
     embeddingModel: EMBEDDING_MODEL,
     embeddingDimensions: EMBEDDING_DIMENSIONS,
+    embeddingUrlIsFallback: !(process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL),
+    searchMinSimilarity: parseFloat(process.env.SEARCH_MIN_SIMILARITY || '0.15'),
+    searchMaxChunks: parseInt(process.env.SEARCH_MAX_CHUNKS || '25', 10),
   };
 }
 

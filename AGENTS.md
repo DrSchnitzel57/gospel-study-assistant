@@ -36,6 +36,7 @@ Ingest (from repo root, needs `db` up and `.env`):
 - `@/*` alias in `app/tsconfig.json` maps to the `app/` directory root, so `@/lib/search` = `app/lib/search.ts`.
 - Search pipeline (`app/app/api/search/route.ts` → `app/lib/search.ts`): LLM query decomposition (`decomposeQuery`) → multi-vector pgvector cosine search (one embedding per decomposed query, unioned; `SEARCH_MIN_SIMILARITY`, default 0.15) + FTS keyword fallback → LLM extracts verbatim quotes → fuzzy `validateQuotesAgainstChunks` (in `app/lib/validation.ts`, ~0.7 overlap, stopwords stripped) filters hallucinations. 20 req/min IP rate limit in the route.
 - `app/next.config.js` sets `output: 'standalone'`; `Dockerfile.web` copies `node_modules` separately because the standalone bundle omits native `pg`/`pgvector`.
+- The `web` container mounts the `ingestdata` volume read-only at `/app/ingestdata` so the Status page (`app/app/status/page.tsx`, fed by `app/app/api/status/route.ts`) can compare downloaded files on disk vs `documents`/`chunks` rows (per `content_category`). The volume maps to `ingest/data/` in the ingest container; the only scripture subdir is `data/scriptures/` (not `scripts/`). Override the scan path locally via `INGEST_DATA_DIR`.
 - Ingest scripts import helpers via `sys.path.insert(0, ../lib)` → `from llm import`, `from db_schema import`, `from db import` (see `ingest/scripts/ingest_scriptures.py:3-7`).
 - Conference download uses Playwright (Chromium installed in `Dockerfile.ingest`); other downloads use requests + BeautifulSoup.
 
