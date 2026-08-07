@@ -96,8 +96,8 @@ function buildDecompositionPrompt(categories?: string[]): string {
 
 Instead of writing search queries, write ${MAX_DECOMPOSED_QUERIES} hypothetical, perfect excerpts or passages that would directly answer the user's underlying emotional or doctrinal need. Write them exactly as they might appear in the source texts. 
 
-To maximize recall, write a mix of styles:
-1. SCRIPTURAL — Write passages in the archaic, poetic idiom of the King James Bible or Book of Mormon (e.g., "And it came to pass...", "Verily I say unto you...", "cast thy burden upon the Lord...").
+To maximize recall, you MUST write at least one passage for EACH of the following styles:
+1. SCRIPTURAL — Write a passage in the archaic, poetic idiom of the King James Bible or Book of Mormon (e.g., "And it came to pass...", "Verily I say unto you...", "cast thy burden upon the Lord...").
 2. DOCTRINAL/PROPHETIC — Write a passage in the modern, authoritative tone of a General Conference talk or church manual explaining the core doctrine.
 3. PASTORAL — Write a passage offering modern comfort and pastoral counsel, addressing the emotion directly.
 
@@ -143,11 +143,11 @@ YOUR TASK: Extract relevant direct quotes from the provided context chunks that 
 GUIDELINES:
 - Understand the user's underlying need, emotion, or situation, not just their literal words.
 - Use deep reasoning: a passage is relevant if it addresses the principle, doctrine, or pastoral counsel behind the question — even if it does not use the same words as the user.
-- Extract the key verbatim passage from each truly relevant chunk (at least a sentence or two). Do NOT force-fit irrelevant chunks. If a chunk isn't deeply relevant, skip it.
+- Extract the key verbatim passage from each truly relevant chunk (at least a sentence or two). Do NOT force-fit entirely irrelevant chunks, BUT you MUST extract at least one quote from EVERY content category present in the chunks (e.g., if scripture chunks are provided, you MUST extract at least one scripture quote). 
 - Include the source attribution for each quote.
-- Spread your selections across ALL content categories present in the chunks (scripture, conference, manual, devotional, history) — do not skip a category that has relevant material.
+- Spread your selections across ALL content categories present in the chunks — do not skip a category that has relevant material.
 - Do not return more than ${MAX_QUOTES_PER_SOURCE} quotes from any single source document — prefer one strong quote per source over many from one source.
-- Aim to return high-quality, impactful quotes (up to ${MAX_QUOTES}).
+- Aim to return high-quality, impactful quotes (up to ${MAX_QUOTES}), ensuring all categories are represented.
 - Do NOT fabricate or paraphrase quotes — only quote text that appears verbatim in the provided chunks.
 - If no relevant content exists, set "no_results" to true.
 
@@ -208,7 +208,7 @@ export function buildUserPrompt(
     includedChunks++;
   }
 
-  prompt += `\nExtract all highly relevant quotes from the chunks above that directly address the user's query. Return up to ${MAX_QUOTES} quotes, with no more than ${MAX_QUOTES_PER_SOURCE} from any single source document, and spread coverage across every content category present in the chunks. Focus on quality and direct emotional/doctrinal relevance. If no truly relevant quotes exist, set no_results to true.`;
+  prompt += `\nExtract all highly relevant quotes from the chunks above that directly address the user's query. Return up to ${MAX_QUOTES} quotes, with no more than ${MAX_QUOTES_PER_SOURCE} from any single source document. You MUST extract at least one quote from every content category present in the chunks. Focus on quality and direct emotional/doctrinal relevance. If no truly relevant quotes exist, set no_results to true.`;
   return prompt;
 }
 
