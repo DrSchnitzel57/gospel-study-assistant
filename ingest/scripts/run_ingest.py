@@ -144,10 +144,16 @@ def run_ingestion(target: str = 'all'):
 
     if target == 'download_conference':
         years = parse_years_arg(sys.argv[2:])
-        if years is None and not sys.argv[2:] and sys.stdin.isatty():
-            years = prompt_for_conference_years()
-        if years is None:
-            logger.info("No year filter given — downloading all conferences.")
+        if years is None and not sys.argv[2:]:
+            try:
+                # Always attempt to prompt if no arguments were provided
+                years = prompt_for_conference_years()
+            except EOFError:
+                logger.error("No years specified and no interactive terminal detected. Please pass years explicitly (e.g. 'download_conference 2018-2025') or use 'download_conference all'.")
+                return
+        if years is None and sys.argv[2:]:
+            # They explicitly passed 'all' or '*'
+            logger.info("Explicitly downloading all conferences.")
         download_conference_safe(years)
         return
 
