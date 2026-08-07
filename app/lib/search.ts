@@ -90,23 +90,24 @@ export function expandQuery(query: string): string {
 function buildDecompositionPrompt(categories?: string[]): string {
   const categoryLine =
     categories && categories.length > 0
-      ? `The user has selected these content categories to search: ${categories.join(', ')}.
-Make sure at least ONE of your queries is targeted per selected category, phrased in the vocabulary and register of that corpus. For example, spirituality is stronger when the query leans on scripture idiom ('broken heart and contrite spirit') rather than the user's modern wording.\n\n`
+      ? `The user has selected these content categories to search: ${categories.join(', ')}.\n\n`
       : '';
   return `You are helping a gospel study assistant find relevant scripture and Church resource passages for a user's question.
 
-Rewrite the user's question into ${MAX_DECOMPOSED_QUERIES} search queries that would each surface DIFFERENT relevant passages. To maximize recall, generate a mix of query facets:
+Instead of writing search queries, write ${MAX_DECOMPOSED_QUERIES} hypothetical, perfect excerpts or passages that would directly answer the user's underlying emotional or doctrinal need. Write them exactly as they might appear in the source texts. 
 
-1. LITERAL — the direct topic words the user used.
-2. DOCTRINAL — the gospel principle that addresses the underlying need (e.g. worthiness, grace, atonement, sanctification, repentance, the enabling power of Christ).
-3. PASTORAL / EMOTIONAL — the feeling behind the question (anxiety, fear, rejection, inadequacy) and the promise/practice that soothes it.
-4. NARRATIVE / SCRIPTURE-STORY — a scripture story, figure, or theme the user's situation echoes, even if it uses completely different words. For example, feelings of anxious worthiness or perfectionism echo Nephi's lament in 2 Nephi 4 ('my soul is cast down and disquieted within me', 'Why should I yield to sin?'), the publican who would not so much as lift up his eyes, or Mormon's 'my heart is filled with all the love of God'. Phrase this query from the STORY and its theme, not the user's literal words.
+To maximize recall, write a mix of styles:
+1. SCRIPTURAL — Write passages in the archaic, poetic idiom of the King James Bible or Book of Mormon (e.g., "And it came to pass...", "Verily I say unto you...", "cast thy burden upon the Lord...").
+2. DOCTRINAL/PROPHETIC — Write a passage in the modern, authoritative tone of a General Conference talk or church manual explaining the core doctrine.
+3. PASTORAL — Write a passage offering modern comfort and pastoral counsel, addressing the emotion directly.
 
-${categoryLine}Each query must be phrased in the idiom of the body of text likely to contain the answer, not echoed verbatim from the user. In particular, phrase at least one query in scripture idiom (e.g. 'cast thy burden upon the Lord and He shall sustain thee', 'a broken heart and a contrite spirit', 'my soul is cast down and disquieted within me', 'the Lord is my shepherd there is no want').
-
-Return ONLY a JSON array of ${MAX_DECOMPOSED_QUERIES} short query strings (a few words to a short phrase). Do not include any commentary. Example:
+${categoryLine}Return ONLY a JSON array of ${MAX_DECOMPOSED_QUERIES} short string passages (1-3 sentences each). Do not include any commentary. Example:
 User: "I feel anxious about whether I'm good enough for God"
-["worthiness and perfectionism", "the grace of Christ enables our hearts to be enough", "feeling inadequate consolation and the peace of God", "Nephi's lament wisdom feeling far from God, and the Lord's tender love", "fear not for God's goodness covers weakness"]`;
+[
+  "And my soul was cast down, and I cried unto the Lord in my weakness, and he did comfort me, saying: My grace is sufficient for thee, for my strength is made perfect in weakness.",
+  "We need not be paralyzed by perfectionism. The Savior's Atonement is not just for sinners, but for saints who are trying, failing, and trying again. He loves us in our imperfections.",
+  "When feelings of inadequacy overwhelm us, we can remember that our worth is great in the sight of God. We are His children, and He asks only for a broken heart and a contrite spirit."
+]`;
 }
 
 export async function decomposeQuery(query: string, categories?: string[]): Promise<string[]> {
@@ -142,12 +143,11 @@ YOUR TASK: Extract relevant direct quotes from the provided context chunks that 
 GUIDELINES:
 - Understand the user's underlying need, emotion, or situation, not just their literal words.
 - Use deep reasoning: a passage is relevant if it addresses the principle, doctrine, or pastoral counsel behind the question — even if it does not use the same words as the user.
-- Be generous and broad: include every chunk that could meaningfully help the person, even if the connection is topical or pastoral rather than word-for-word.
-- Extract the key verbatim passage from each relevant chunk (at least a sentence or two).
+- Extract the key verbatim passage from each truly relevant chunk (at least a sentence or two). Do NOT force-fit irrelevant chunks. If a chunk isn't deeply relevant, skip it.
 - Include the source attribution for each quote.
 - Spread your selections across ALL content categories present in the chunks (scripture, conference, manual, devotional, history) — do not skip a category that has relevant material.
 - Do not return more than ${MAX_QUOTES_PER_SOURCE} quotes from any single source document — prefer one strong quote per source over many from one source.
-- Aim to return as many relevant quotes as possible (up to ${MAX_QUOTES}).
+- Aim to return high-quality, impactful quotes (up to ${MAX_QUOTES}).
 - Do NOT fabricate or paraphrase quotes — only quote text that appears verbatim in the provided chunks.
 - If no relevant content exists, set "no_results" to true.
 
@@ -208,7 +208,7 @@ export function buildUserPrompt(
     includedChunks++;
   }
 
-  prompt += `\nExtract all relevant quotes from the chunks above that relate to the user's query. Return up to ${MAX_QUOTES} quotes, with no more than ${MAX_QUOTES_PER_SOURCE} from any single source document, and spread coverage across every content category present in the chunks. Be generous in what you consider relevant. If no relevant quotes exist, set no_results to true.`;
+  prompt += `\nExtract all highly relevant quotes from the chunks above that directly address the user's query. Return up to ${MAX_QUOTES} quotes, with no more than ${MAX_QUOTES_PER_SOURCE} from any single source document, and spread coverage across every content category present in the chunks. Focus on quality and direct emotional/doctrinal relevance. If no truly relevant quotes exist, set no_results to true.`;
   return prompt;
 }
 
@@ -356,17 +356,15 @@ export async function searchChunks(
 
   const vectorChunks = selectDiverseChunks(allChunks, activeCategories, MAX_CHUNKS);
 
-  // Keyword fallback across EVERY decomposed query (not just the first): boosts
-  // recall for named references (e.g. "Alma 32", "3 Nephi 11") and for scripture-
-  // idiom lexicon that semantic search can miss. Each query excludes results the
-  // previous queries already found.
+  // Keyword fallback ONLY for the original literal query.
+  // We do not want to run full-text search on the generated HyDE paragraphs
+  // because that introduces irrelevant lexical matches.
   const keywordSeed = [...vectorChunks];
   const keywordChunks: ChunkRow[] = [];
-  for (const q of embeddingQueries) {
-    if (keywordChunks.length >= 60) break;
-    const kw = await keywordSearch(q, filters, keywordSeed);
+  const originalQuery = embeddingQueries[0]; // The original user query is always first
+  if (originalQuery) {
+    const kw = await keywordSearch(originalQuery, filters, keywordSeed);
     keywordChunks.push(...kw);
-    keywordSeed.push(...kw);
   }
   const keywordPooled = [...new Map(keywordChunks.map((c) => [c.id, c])).values()]
     .sort((a, b) => b.similarity - a.similarity)

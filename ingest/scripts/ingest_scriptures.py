@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 from llm import get_embeddings
 from db_schema import ensure_schema
-from db import get_conn, return_conn, chunk_text, insert_chunks_batch, EMBEDDING_BATCH_SIZE
+from db import get_conn, return_conn, chunk_scripture, insert_chunks_batch, EMBEDDING_BATCH_SIZE
 
 
 # ─── Scripture Ingestion ───────────────────────────────────────────────────────
@@ -129,18 +129,19 @@ def ingest_scripture_from_text(scripture_key: str, book_name: str, text: str):
             return 0
 
         # Chunk text
-        chunks = chunk_text(text)
+        chunks_data = chunk_scripture(text)
+        chunk_texts = [c[0] for c in chunks_data]
         verse_ref = book_name
 
         # Get embeddings in batches
-        all_embeddings = get_embeddings(chunks, batch_size=EMBEDDING_BATCH_SIZE)
+        all_embeddings = get_embeddings(chunk_texts, batch_size=EMBEDDING_BATCH_SIZE)
 
         # Insert all chunks with embeddings
-        insert_chunks_batch(cur, doc_id, chunks, all_embeddings, verse_ref)
+        insert_chunks_batch(cur, doc_id, chunks_data, all_embeddings, verse_ref)
 
         conn.commit()
-        print(f"  Indexed {len(chunks)} chunks for {book_name}")
-        return len(chunks)
+        print(f"  Indexed {len(chunks_data)} chunks for {book_name}")
+        return len(chunks_data)
 
     except Exception as e:
         conn.rollback()

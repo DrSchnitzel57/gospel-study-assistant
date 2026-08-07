@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'lib'))
 from llm import get_embeddings
 from db_schema import ensure_schema
-from db import get_conn, return_conn, chunk_text, insert_chunks_batch, EMBEDDING_BATCH_SIZE
+from db import get_conn, return_conn, chunk_text_semantic, insert_chunks_batch, EMBEDDING_BATCH_SIZE
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
@@ -95,17 +95,18 @@ def ingest_text_file(
             print(f"    Skipping (too short): {title}")
             return 0
 
-        chunks = chunk_text(text)
+        chunks_data = chunk_text_semantic(text)
+        chunk_texts = [c[0] for c in chunks_data]
 
         # Get embeddings in batches
-        all_embeddings = get_embeddings(chunks, batch_size=EMBEDDING_BATCH_SIZE)
+        all_embeddings = get_embeddings(chunk_texts, batch_size=EMBEDDING_BATCH_SIZE)
 
         # Insert all chunks
-        insert_chunks_batch(cur, doc_id, chunks, all_embeddings, reference_prefix or title)
+        insert_chunks_batch(cur, doc_id, chunks_data, all_embeddings, reference_prefix or title)
 
         conn.commit()
-        print(f"    Indexed {len(chunks)} chunks for {title[:60]}")
-        return len(chunks)
+        print(f"    Indexed {len(chunks_data)} chunks for {title[:60]}")
+        return len(chunks_data)
 
     except Exception as e:
         conn.rollback()
